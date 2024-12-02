@@ -24,9 +24,7 @@ ENV VEHICLE_NAME="e700_4801"
 RUN pip install --no-cache-dir --upgrade pip
 
 # Install the dependencies specified in the requirements file and other required libraries
-# The requirements file should contain the project's core dependencies
-# Additionally, seaborn, matplotlib, scikit-learn, scipy, pandas, numpy, and copulas are installed for data processing and visualization
-RUN pip install --no-cache-dir -r requirements_real_producer.txt
-RUN pip install scipy pandas numpy copulas
+RUN pip install --no-cache-dir -r requirements.txt
+
 # Command to start the data simulator script when the container is run
 CMD ["python", "synthetic_data_generator.py"]
