@@ -1,14 +1,6 @@
 # Use a base image of Python (Alpine version for a smaller container size and minimal dependencies)
 FROM python:3.10-alpine
 
-ARG WANDB_API_KEY
-ARG GIT_USERNAME
-ARG GIT_TOKEN
-
-ENV WANDB_API_KEY=${WANDB_API_KEY}
-ENV GIT_USERNAME=${GIT_USERNAME}
-ENV GIT_TOKEN=${GIT_TOKEN}
-
 
 # Set the working directory inside the container
 # This is where all the files will be copied, and the commands will be executed
