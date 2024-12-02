@@ -1,0 +1,2 @@
+# requirements_producer.txt
+confluent-kafka==1.9.2
