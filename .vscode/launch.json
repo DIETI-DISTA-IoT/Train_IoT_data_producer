@@ -8,7 +8,7 @@
             "name": "PRODUCE",
             "type": "debugpy",
             "request": "launch",
-            "program": "synthetic_data_generator.py",
+            "program": "produce.py",
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": []
