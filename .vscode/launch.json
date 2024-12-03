@@ -11,7 +11,8 @@
             "program": "produce.py",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": []
+            "args": ["--vehicle_name=tom",
+                    "--logging_level=DEBUG"]
         }
     ]
 }

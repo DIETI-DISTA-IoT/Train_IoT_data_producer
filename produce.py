@@ -15,27 +15,6 @@ import json
 import argparse
 
 
-# Configure logging for detailed information
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# Environment variables for Kafka broker and topic name
-KAFKA_BROKER = os.getenv('KAFKA_BROKER', 'kafka:9092')
-VEHICLE_NAME=os.getenv('VEHICLE_NAME')
-CONTAINER_NAME = os.getenv('CONTAINER_NAME', 'generic_producer')
-# Validate that KAFKA_BROKER and TOPIC_NAME are set
-if not KAFKA_BROKER:
-    raise ValueError("Environment variable KAFKA_BROKER is missing.")
-if not VEHICLE_NAME:
-    raise ValueError("Environment variable VEHICLE_NAME is missing.")
-
-# Kafka producer configuration
-conf_prod = {
-    'bootstrap.servers': KAFKA_BROKER,
-    'key.serializer': StringSerializer('utf_8'),
-    'value.serializer': lambda x, ctx: json.dumps(x).encode('utf-8')
-}
-producer = SerializingProducer(conf_prod)
-
 # load the copula objects later:
 with open('copula_anomalie.pkl', 'rb') as f:
     copula_anomalie = pickle.load(f)
@@ -71,7 +50,7 @@ def produce_message(data, topic_name):
     try:
         producer.produce(topic=topic_name, value=data)  # Send the message to Kafka
         producer.flush()  # Ensure the message is immediately sent
-        logging.info(f"{CONTAINER_NAME} sent a message to {topic_name}")
+        logger.info(f"sent a message to {topic_name}")
     except Exception as e:
         print(f"Error while producing message to {topic_name} : {e}")
 
@@ -149,26 +128,42 @@ def thread_normali(args):
 
 
 def main():
+    global VEHICLE_NAME, KAFKA_BROKER
+    global producer, logger
+
     parser = argparse.ArgumentParser(description='Kafka Producer for Synthetic Vehicle Data')
+    parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle')        
+    parser.add_argument('--container_name', type=str, default='GENERIC_PRODUCER', help='Name of the container')
+    parser.add_argument('--kafka_broker', type=str, default='kafka:9092', help='Kafka broker URL')
+    parser.add_argument('--logging_level', type=str, default='INFO', help='Logging level')
     parser.add_argument('--mu_anomalies', type=float, default=157, help='Mu parameter (mean of the mean interarrival times of anomalies)')
     parser.add_argument('--mu_normal', type=float, default=115, help='Mu parameter (mean of the mean interarrival times of normal data)')
     parser.add_argument('--alpha', type=float, default=0.2, help='Alpha parameter (scaling factor of the mean interarrival times of both anomalies and normal data)')
     parser.add_argument('--beta', type=float, default=1.9, help='Beta parameter (std dev of interarrival times of both anomalies and normal data)')
-    #parser.add_argument('--vehicle_name', type=str, default='e700_4801', help='Comma-separated list of vehicle names')
 
     args = parser.parse_args()
 
-    #vehicle_names=args.vehicle_name.split(',')
+    VEHICLE_NAME = args.vehicle_name
 
-    #threads=[]
+    logger = logging.getLogger(args.container_name)
+    logger.setLevel(args.logging_level)
 
-    logging.info(f"Setting up threads for vehicle: {VEHICLE_NAME}")
+    conf_prod = {
+        'bootstrap.servers': args.kafka_broker,
+        'key.serializer': StringSerializer('utf_8'),
+        'value.serializer': lambda x, ctx: json.dumps(x).encode('utf-8')
+    }
+    producer = SerializingProducer(conf_prod)
+
+    
+
+
+    logger.debug(f"Setting up threads for vehicle: {VEHICLE_NAME}")
     vehicle_args=argparse.Namespace(
         mu_anomalies=args.mu_anomalies,
         mu_normal=args.mu_normal,
         alpha=args.alpha,
         beta=args.beta,
-        #vehicle_name=VEHICLE_NAME
     )
 
     thread1 = threading.Thread(target=thread_anomalie, args=(vehicle_args,))
