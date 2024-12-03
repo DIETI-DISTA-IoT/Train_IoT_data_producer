@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Environment variables for Kafka broker and topic name
 KAFKA_BROKER = os.getenv('KAFKA_BROKER', 'kafka:9092')
 VEHICLE_NAME=os.getenv('VEHICLE_NAME')
-
+CONTAINER_NAME = os.getenv('CONTAINER_NAME', 'generic_producer')
 # Validate that KAFKA_BROKER and TOPIC_NAME are set
 if not KAFKA_BROKER:
     raise ValueError("Environment variable KAFKA_BROKER is missing.")
@@ -69,10 +69,9 @@ def produce_message(data, topic_name):
         topic_name (str): The Kafka topic to which the message will be sent.
     """
     try:
-        logging.info(f"Producing message to {topic_name} >>> {data}")
         producer.produce(topic=topic_name, value=data)  # Send the message to Kafka
         producer.flush()  # Ensure the message is immediately sent
-        logging.info(f"Message sent to {topic_name} >>> {data}")
+        logging.info(f"{CONTAINER_NAME} sent a message to {topic_name}")
     except Exception as e:
         print(f"Error while producing message to {topic_name} : {e}")
 
