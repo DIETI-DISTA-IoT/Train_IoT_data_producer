@@ -1,8 +1,6 @@
 import pandas as pd
 import numpy as np
 import time
-from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
 from scipy.stats import lognorm
 import pickle
 import threading
@@ -10,7 +8,6 @@ import time
 from confluent_kafka import SerializingProducer
 from confluent_kafka.serialization import StringSerializer
 import logging
-import os
 import json
 import argparse
 
