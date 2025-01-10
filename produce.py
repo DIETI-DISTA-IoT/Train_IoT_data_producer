@@ -227,7 +227,7 @@ def main():
     VEHICLE_NAME = args.vehicle_name
 
     logger = logging.getLogger(args.container_name)
-    logger.setLevel(args.logging_level)
+    logger.setLevel(str(args.logging_level).upper())
 
     conf_prod = {
         'bootstrap.servers': args.kafka_broker,
