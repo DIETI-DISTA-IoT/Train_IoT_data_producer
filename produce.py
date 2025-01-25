@@ -242,7 +242,7 @@ def main():
     parser.add_argument('--mu_anomalies', type=float, default=157, help='Mu parameter (mean of the mean interarrival times of anomalies)')
     parser.add_argument('--mu_normal', type=float, default=115, help='Mu parameter (mean of the mean interarrival times of normal data)')
     parser.add_argument('--alpha', type=float, default=0.2, help='Alpha parameter (scaling factor of the mean interarrival times of both anomalies and normal data)')
-    parser.add_argument('--beta', type=float, default=1.9, help='Beta parameter (std dev of interarrival times of both anomalies and normal data)')
+    parser.add_argument('--beta', type=float, default=1.9, help='Beta parameter (scaling factor of std dev of interarrival times of both anomalies and normal data)')
     parser.add_argument('--anomaly_classes',  type=parse_int_list, default=list(range(0,15)))
     parser.add_argument('--diagnostics_classes', type=parse_int_list, default=list(range(0,15)))
 
