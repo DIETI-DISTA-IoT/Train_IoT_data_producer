@@ -14,7 +14,7 @@
             "args": ["--vehicle_name=tom",
                     "--logging_level=DEBUG",
                     "--anomaly_classes=0,1,2,3",
-                    "--diagnostics_classes=0,1,3,4"
+                    "--diagnostics_classes=6,7,8"
                     ]
                     
         }
