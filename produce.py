@@ -65,7 +65,7 @@ def produce_message(data, topic_name):
 
 
 def sample_anomaly_from_global():
-    return copula_anomalie.sample(1)
+    return -1, copula_anomalie.sample(1)
 
 
 def sample_anomaly_from_clusters():
@@ -73,7 +73,7 @@ def sample_anomaly_from_clusters():
         anomaly_probabilities['cluster'],
         size=1, 
         p=anomaly_probabilities['probability'])
-    return anomaly_generators[cluster_to_sample_from[0]].sample(1)
+    return cluster_to_sample_from[0], anomaly_generators[cluster_to_sample_from[0]].sample(1)
 
 
 def thread_anomalie(args):
@@ -88,7 +88,7 @@ def thread_anomalie(args):
         sample_anomaly_function = sample_anomaly_from_clusters
 
     while True:
-        synthetic_anomalie = sample_anomaly_function()
+        cluster, synthetic_anomalie = sample_anomaly_function()
         durata_anomalia = lognormal_anomalie.rvs(size=1)
         synthetic_anomalie['Durata'] = durata_anomalia
         synthetic_anomalie['Flotta'] = 'ETR700'
@@ -112,12 +112,13 @@ def thread_anomalie(args):
         data_to_send = synthetic_anomalie.iloc[0].to_dict()
         data_to_send['Timestamp'] = str(data_to_send['Timestamp'])
         data_to_send['Timestamp chiusura'] = str(data_to_send['Timestamp chiusura'])
+        data_to_send['cluster'] = str(cluster)
         produce_message(data_to_send, topic_name)
         time.sleep(durata_anomalia[0])
 
 
 def sample_normal_from_global():
-    return copula_normali.sample(1)
+    return -1, copula_normali.sample(1)
 
 
 def sample_normal_from_clusters():
@@ -125,7 +126,7 @@ def sample_normal_from_clusters():
         diagnostics_probabilities['cluster'],
         size=1, 
         p=diagnostics_probabilities['probability'])
-    return diagnostics_generators[cluster_to_sample_from[0]].sample(1)
+    return cluster_to_sample_from[0], diagnostics_generators[cluster_to_sample_from[0]].sample(1)
 
 
 def thread_normali(args):
@@ -140,7 +141,7 @@ def thread_normali(args):
         sample_normal_function = sample_normal_from_clusters
 
     while True:
-        synthetic_normali = copula_normali.sample(1)
+        cluster, synthetic_normali = sample_normal_function()
         durata_normale = lognormal_normali.rvs(size=1)
         synthetic_normali['Durata'] = durata_normale
         synthetic_normali['Flotta'] = 'ETR700'
@@ -164,6 +165,7 @@ def thread_normali(args):
         data_to_send = synthetic_normali.iloc[0].to_dict()
         data_to_send['Timestamp'] = str(data_to_send['Timestamp'])
         data_to_send['Timestamp chiusura'] = str(data_to_send['Timestamp chiusura'])
+        data_to_send['cluster'] = str(cluster)
         produce_message(data_to_send, topic_name)
         time.sleep(durata_normale[0])
 
@@ -232,9 +234,11 @@ def get_diagnostics_generators_dict(diagnostics_classes):
 
 def signal_handler(sig, frame):
     logger.debug(f"Received signal {sig}. Gracefully stopping {VEHICLE_NAME} producer.")
+    anomaly_thread.join(1)
     if anomaly_thread.is_alive():
         logger.debug("Stopping anomaly thread")
         anomaly_thread._stop()
+    diagnostics_thread.join(1)
     if diagnostics_thread.is_alive():
         logger.debug("Stopping diagnostics thread")
         diagnostics_thread._stop()
@@ -301,8 +305,8 @@ def main():
     anomaly_thread.start()
     diagnostics_thread.start()
     
-    anomaly_thread.join()
-    diagnostics_thread.join()
+    while True:
+        time.sleep(0.1)
 
 
 if __name__ == '__main__':
