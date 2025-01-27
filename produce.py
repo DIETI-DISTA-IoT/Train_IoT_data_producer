@@ -10,7 +10,7 @@ from confluent_kafka.serialization import StringSerializer
 import logging
 import json
 import argparse
-
+import signal
 
 # load the copula objects later:
 with open('copula_anomalie.pkl', 'rb') as f:
@@ -230,9 +230,21 @@ def get_diagnostics_generators_dict(diagnostics_classes):
     return diagnostics_generators
 
 
+def signal_handler(sig, frame):
+    logger.debug(f"Received signal {sig}. Gracefully stopping {VEHICLE_NAME} producer.")
+    anomaly_thread.join(1)
+    if anomaly_thread.is_alive():
+        logger.debug("Stopping anomaly thread")
+        anomaly_thread._stop()
+    diagnostics_thread.join(1)
+    if diagnostics_thread.is_alive():
+        logger.debug("Stopping diagnostics thread")
+        diagnostics_thread._stop()
+
+
 def main():
     global VEHICLE_NAME, KAFKA_BROKER
-    global producer, logger, anomaly_generators, diagnostics_generators
+    global producer, logger, anomaly_generators, diagnostics_generators, anomaly_thread, diagnostics_thread
 
     parser = argparse.ArgumentParser(description='Kafka Producer for Synthetic Vehicle Data')
     parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle')        
@@ -275,23 +287,25 @@ def main():
     if args.diagnostics_classes != list(range(0,15)):
         diagnostics_generators = get_diagnostics_generators_dict(args.diagnostics_classes)
 
-    thread1 = threading.Thread(target=thread_anomalie, args=(vehicle_args,))
-    thread2 = threading.Thread(target=thread_normali, args=(vehicle_args,))
+    anomaly_thread = threading.Thread(target=thread_anomalie, args=(vehicle_args,))
+    diagnostics_thread = threading.Thread(target=thread_normali, args=(vehicle_args,))
 
     # Set daemon to True
-    thread1.daemon = True
-    thread2.daemon = True
+    anomaly_thread.daemon = True
+    diagnostics_thread.daemon = True
 
     # Add threads to the list
     #threads.extend([thread1,thread2])
 
     # Start threads
     logging.info(f"Starting threads for vehicle: {VEHICLE_NAME}")
-    thread1.start()
-    thread2.start()
+    signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame))
+    anomaly_thread.start()
+    diagnostics_thread.start()
 
-    thread1.join()
-    thread2.join()
+
+    anomaly_thread.join()
+    diagnostics_thread.join()
 
 
 if __name__ == '__main__':
