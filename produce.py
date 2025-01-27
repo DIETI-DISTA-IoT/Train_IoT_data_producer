@@ -232,11 +232,9 @@ def get_diagnostics_generators_dict(diagnostics_classes):
 
 def signal_handler(sig, frame):
     logger.debug(f"Received signal {sig}. Gracefully stopping {VEHICLE_NAME} producer.")
-    anomaly_thread.join(1)
     if anomaly_thread.is_alive():
         logger.debug("Stopping anomaly thread")
         anomaly_thread._stop()
-    diagnostics_thread.join(1)
     if diagnostics_thread.is_alive():
         logger.debug("Stopping diagnostics thread")
         diagnostics_thread._stop()
@@ -302,8 +300,7 @@ def main():
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame))
     anomaly_thread.start()
     diagnostics_thread.start()
-
-
+    
     anomaly_thread.join()
     diagnostics_thread.join()
 
