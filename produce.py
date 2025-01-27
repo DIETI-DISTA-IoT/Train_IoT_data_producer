@@ -87,7 +87,7 @@ def thread_anomalie(args):
     else:
         sample_anomaly_function = sample_anomaly_from_clusters
 
-    while True:
+    while not stop_threads:
         cluster, synthetic_anomalie = sample_anomaly_function()
         durata_anomalia = lognormal_anomalie.rvs(size=1)
         synthetic_anomalie['Durata'] = durata_anomalia
@@ -140,7 +140,7 @@ def thread_normali(args):
     else:
         sample_normal_function = sample_normal_from_clusters
 
-    while True:
+    while not stop_threads:
         cluster, synthetic_normali = sample_normal_function()
         durata_normale = lognormal_normali.rvs(size=1)
         synthetic_normali['Durata'] = durata_normale
@@ -233,20 +233,16 @@ def get_diagnostics_generators_dict(diagnostics_classes):
 
 
 def signal_handler(sig, frame):
+    global stop_threads
     logger.debug(f"Received signal {sig}. Gracefully stopping {VEHICLE_NAME} producer.")
-    anomaly_thread.join(1)
-    if anomaly_thread.is_alive():
-        logger.debug("Stopping anomaly thread")
-        anomaly_thread._stop()
-    diagnostics_thread.join(1)
-    if diagnostics_thread.is_alive():
-        logger.debug("Stopping diagnostics thread")
-        diagnostics_thread._stop()
+    stop_threads = True
+    anomaly_thread.join()
+    diagnostics_thread.join()
 
 
 def main():
     global VEHICLE_NAME, KAFKA_BROKER
-    global producer, logger, anomaly_generators, diagnostics_generators, anomaly_thread, diagnostics_thread
+    global producer, logger, anomaly_generators, diagnostics_generators, anomaly_thread, diagnostics_thread, stop_threads
 
     parser = argparse.ArgumentParser(description='Kafka Producer for Synthetic Vehicle Data')
     parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle')        
@@ -302,6 +298,7 @@ def main():
     # Start threads
     logging.info(f"Starting threads for vehicle: {VEHICLE_NAME}")
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame))
+    stop_threads = False
     anomaly_thread.start()
     diagnostics_thread.start()
     
