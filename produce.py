@@ -59,7 +59,7 @@ def produce_message(data, topic_name):
     try:
         producer.produce(topic=topic_name, value=data)  # Send the message to Kafka
         producer.flush()  # Ensure the message is immediately sent
-        logger.info(f"sent a message to {topic_name}")
+        # logger.debug(f"sent a message to {topic_name}")
     except Exception as e:
         print(f"Error while producing message to {topic_name} : {e}")
 
