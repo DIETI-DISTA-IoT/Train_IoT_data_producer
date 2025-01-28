@@ -268,7 +268,7 @@ def main():
     }
     producer = SerializingProducer(conf_prod)
 
-    logger.debug(f"Setting up threads for vehicle: {VEHICLE_NAME}")
+    logger.info(f"Setting up producing threads for vehicle: {VEHICLE_NAME}")
     vehicle_args=argparse.Namespace(
         mu_anomalies=args.mu_anomalies,
         mu_normal=args.mu_normal,
