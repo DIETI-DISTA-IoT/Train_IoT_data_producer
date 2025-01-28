@@ -236,7 +236,7 @@ def get_diagnostics_generators_dict(diagnostics_classes):
 
 def signal_handler(sig, frame):
     global stop_threads
-    logger.info(f"Received signal {sig}. Gracefully stopping {VEHICLE_NAME} producer.")
+    logger.debug(f"Received signal {sig}. Gracefully stopping {VEHICLE_NAME} producer.")
     stop_threads = True
 
 
@@ -307,7 +307,7 @@ def main():
     logging.info(f"Stopping producing threads for vehicle: {VEHICLE_NAME}")
     anomaly_thread.join(1)
     diagnostics_thread.join(1)
-    logging.info(f"Stopped producing threads for vehicle: {VEHICLE_NAME}")
+    print(f"Stopped producing threads for vehicle: {VEHICLE_NAME}")
 
 if __name__ == '__main__':
     main()
