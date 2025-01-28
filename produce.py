@@ -302,7 +302,7 @@ def main():
     
     while not stop_threads:
         time.sleep(0.1)
-
+    logging.info(f"Stopping producing threads for vehicle: {VEHICLE_NAME}")
     anomaly_thread.join(1)
     diagnostics_thread.join(1)
     logging.info(f"Stopped producing threads for vehicle: {VEHICLE_NAME}")
