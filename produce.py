@@ -77,6 +77,7 @@ def sample_anomaly_from_clusters():
 
 
 def thread_anomalie(args):
+    logger.info(f"Starting thread for anomalies generation for vehicle: {VEHICLE_NAME}")
     media_durata_anomalie = args.mu_anomalies * args.alpha
     sigma_anomalie = 1 * args.beta
     lognormal_anomalie = lognorm(s=sigma_anomalie, scale=np.exp(np.log(media_durata_anomalie)))
@@ -130,6 +131,7 @@ def sample_normal_from_clusters():
 
 
 def thread_normali(args):
+    logger.info(f"Starting thread for normal data generation for vehicle: {VEHICLE_NAME}")
     media_durata_normali = args.mu_normal * args.alpha
     sigma_normali = 1 * args.beta
     lognormal_normali = lognorm(s=sigma_normali, scale=np.exp(np.log(media_durata_normali)))
@@ -234,7 +236,7 @@ def get_diagnostics_generators_dict(diagnostics_classes):
 
 def signal_handler(sig, frame):
     global stop_threads
-    logger.debug(f"Received signal {sig}. Gracefully stopping {VEHICLE_NAME} producer.")
+    logger.info(f"Received signal {sig}. Gracefully stopping {VEHICLE_NAME} producer.")
     stop_threads = True
 
 
