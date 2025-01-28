@@ -236,8 +236,6 @@ def signal_handler(sig, frame):
     global stop_threads
     logger.debug(f"Received signal {sig}. Gracefully stopping {VEHICLE_NAME} producer.")
     stop_threads = True
-    anomaly_thread.join()
-    diagnostics_thread.join()
 
 
 def main():
@@ -302,9 +300,12 @@ def main():
     anomaly_thread.start()
     diagnostics_thread.start()
     
-    while True:
+    while not stop_threads:
         time.sleep(0.1)
 
+    anomaly_thread.join(1)
+    diagnostics_thread.join(1)
+    logging.info(f"Stopped producing threads for vehicle: {VEHICLE_NAME}")
 
 if __name__ == '__main__':
     main()
