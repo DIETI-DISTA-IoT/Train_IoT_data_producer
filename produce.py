@@ -83,7 +83,7 @@ def thread_anomalie(args):
     lognormal_anomalie = lognorm(s=sigma_anomalie, scale=np.exp(np.log(media_durata_anomalie)))
     topic_name = f"{VEHICLE_NAME}_anomalies"
 
-    if args.anomaly_classes == list(range(0,15)):
+    if args.anomaly_classes == list(range(0,19)):
         sample_anomaly_function = sample_anomaly_from_global
     else:
         sample_anomaly_function = sample_anomaly_from_clusters
@@ -188,7 +188,7 @@ def adjust_probability(index, probability, main_classes, main_prob, low_prob):
 
 def normalize_anomaly_probabilities(anomaly_classes):
     global anomaly_probabilities
-    low_prob_classes = [x for x in range(0,15) if x not in anomaly_classes]
+    low_prob_classes = [x for x in range(0,19) if x not in anomaly_classes]
     
     main_anomaly_probabilities = anomaly_probabilities[anomaly_probabilities.index.isin(anomaly_classes)]
     main_prob = main_anomaly_probabilities['probability'].sum()
@@ -219,7 +219,7 @@ def normalize_diagnostics_probabilities(diagnostics_classes):
 def get_anomaly_generators_dict(anomaly_classes):
     normalize_anomaly_probabilities(anomaly_classes)
     anomaly_generators = {}
-    for anomaly_class in range(0,15):
+    for anomaly_class in range(0,19):
         with open(f'generators/anomalies/copula_anomalie_cluster_{anomaly_class}.pkl', 'rb') as f:
             anomaly_generators[anomaly_class] = pickle.load(f)
     return anomaly_generators
@@ -253,7 +253,7 @@ def main():
     parser.add_argument('--mu_normal', type=float, default=115, help='Mu parameter (mean of the mean interarrival times of normal data)')
     parser.add_argument('--alpha', type=float, default=0.2, help='Alpha parameter (scaling factor of the mean interarrival times of both anomalies and normal data)')
     parser.add_argument('--beta', type=float, default=1.9, help='Beta parameter (scaling factor of std dev of interarrival times of both anomalies and normal data)')
-    parser.add_argument('--anomaly_classes',  type=parse_int_list, default=list(range(0,15)))
+    parser.add_argument('--anomaly_classes',  type=parse_int_list, default=list(range(0,19)))
     parser.add_argument('--diagnostics_classes', type=parse_int_list, default=list(range(0,15)))
 
     args = parser.parse_args()
@@ -280,7 +280,7 @@ def main():
         diagnostics_classes=args.diagnostics_classes
     )
 
-    if args.anomaly_classes != list(range(0,15)):
+    if args.anomaly_classes != list(range(0,19)):
         anomaly_generators = get_anomaly_generators_dict(args.anomaly_classes)
     if args.diagnostics_classes != list(range(0,15)):
         diagnostics_generators = get_diagnostics_generators_dict(args.diagnostics_classes)
