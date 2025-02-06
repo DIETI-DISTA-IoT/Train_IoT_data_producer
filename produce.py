@@ -260,8 +260,8 @@ def main():
 
     VEHICLE_NAME = args.vehicle_name
 
-    logger = logging.getLogger(args.container_name)
-    logger.setLevel(str(args.logging_level).upper())
+    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
+    logger = logging.getLogger(args.container_name+'_'+'producer')
 
     conf_prod = {
         'bootstrap.servers': args.kafka_broker,
@@ -296,7 +296,7 @@ def main():
     #threads.extend([thread1,thread2])
 
     # Start threads
-    logging.info(f"Starting threads for vehicle: {VEHICLE_NAME}")
+    logger.info(f"Starting threads...")
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame))
     stop_threads = False
     anomaly_thread.start()
@@ -304,10 +304,10 @@ def main():
     
     while not stop_threads:
         time.sleep(0.1)
-    logging.info(f"Stopping producing threads for vehicle: {VEHICLE_NAME}")
+    logger.info(f"Stopping producing threads...")
     anomaly_thread.join(1)
     diagnostics_thread.join(1)
-    print(f"Stopped producing threads for vehicle: {VEHICLE_NAME}")
+    logger.info(f"Stopped producing threads.")
 
 if __name__ == '__main__':
     main()
