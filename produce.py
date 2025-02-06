@@ -125,7 +125,8 @@ def thread_anomalie(args):
         data_to_send['cluster'] = str(cluster)
         produced_anomalies += 1
         produce_message(data_to_send, topic_name)
-        time.sleep(durata_anomalia[0])
+        if args.time_emulation:
+            time.sleep(durata_anomalia[0])
 
 
 def sample_normal_from_global():
@@ -181,7 +182,8 @@ def thread_normali(args):
         data_to_send['cluster'] = str(cluster)
         produce_message(data_to_send, topic_name)
         produced_diagnostics += 1
-        time.sleep(durata_normale[0])
+        if args.time_emulation:
+            time.sleep(durata_normale[0])
 
 
 def adjust_probability(index, probability, main_classes, main_prob, low_prob):
@@ -267,6 +269,7 @@ def main():
     parser.add_argument('--beta', type=float, default=1.9, help='Beta parameter (scaling factor of std dev of interarrival times of both anomalies and normal data)')
     parser.add_argument('--anomaly_classes',  type=parse_int_list, default=list(range(0,19)))
     parser.add_argument('--diagnostics_classes', type=parse_int_list, default=list(range(0,15)))
+    parser.add_argument('--time_emulation', type=bool, default=True, help='paced production of messages according to event simulatedduration')
 
     args = parser.parse_args()
 
