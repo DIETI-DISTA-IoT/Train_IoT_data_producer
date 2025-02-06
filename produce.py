@@ -269,7 +269,7 @@ def main():
     parser.add_argument('--beta', type=float, default=1.9, help='Beta parameter (scaling factor of std dev of interarrival times of both anomalies and normal data)')
     parser.add_argument('--anomaly_classes',  type=parse_int_list, default=list(range(0,19)))
     parser.add_argument('--diagnostics_classes', type=parse_int_list, default=list(range(0,15)))
-    parser.add_argument('--time_emulation', type=bool, default=True, help='paced production of messages according to event simulatedduration')
+    parser.add_argument('--time_emulation', action='store_true', help='paced production of messages according to event simulatedduration')
 
     args = parser.parse_args()
 
