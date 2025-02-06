@@ -292,7 +292,8 @@ def main():
         alpha=args.alpha,
         beta=args.beta,
         anomaly_classes=args.anomaly_classes,
-        diagnostics_classes=args.diagnostics_classes
+        diagnostics_classes=args.diagnostics_classes,
+        time_emulation=args.time_emulation
     )
 
     if args.anomaly_classes != list(range(0,19)):
