@@ -19,6 +19,10 @@ with open('copula_anomalie.pkl', 'rb') as f:
 with open('copula_normali.pkl', 'rb') as f:
     copula_normali = pickle.load(f)
 
+produced_records = 0
+produced_anomalies = 0
+produced_diagnostics = 0
+
 # load the probabilities of the classes:
 anomaly_probabilities = pd.read_csv('generators/anomaly_cluster_probabilities.csv')
 diagnostics_probabilities = pd.read_csv('generators/diagnostics_cluster_probabilities.csv')
@@ -49,6 +53,7 @@ def parse_int_list(arg):
 
 
 def produce_message(data, topic_name):
+    global produced_records, produced_anomalies, produced_diagnostics
     """
     Produce a message to Kafka for a specific sensor type.
 
@@ -58,8 +63,11 @@ def produce_message(data, topic_name):
     """
     try:
         producer.produce(topic=topic_name, value=data)  # Send the message to Kafka
-        producer.flush()  # Ensure the message is immediately sent
-        # logger.debug(f"sent a message to {topic_name}")
+        produced_records += 1
+        if produced_records % 50 == 0:
+            producer.flush()
+        if produced_records % 100 == 0:
+            logger.info(f"sent {produced_records} records for now. {produced_anomalies} anomalies and {produced_diagnostics} diagnostics.")
     except Exception as e:
         print(f"Error while producing message to {topic_name} : {e}")
 
@@ -77,6 +85,7 @@ def sample_anomaly_from_clusters():
 
 
 def thread_anomalie(args):
+    global produced_anomalies
     logger.info(f"Starting thread for anomalies generation for vehicle: {VEHICLE_NAME}")
     media_durata_anomalie = args.mu_anomalies * args.alpha
     sigma_anomalie = 1 * args.beta
@@ -114,6 +123,7 @@ def thread_anomalie(args):
         data_to_send['Timestamp'] = str(data_to_send['Timestamp'])
         data_to_send['Timestamp chiusura'] = str(data_to_send['Timestamp chiusura'])
         data_to_send['cluster'] = str(cluster)
+        produced_anomalies += 1
         produce_message(data_to_send, topic_name)
         time.sleep(durata_anomalia[0])
 
@@ -131,6 +141,7 @@ def sample_normal_from_clusters():
 
 
 def thread_normali(args):
+    global produced_diagnostics
     logger.info(f"Starting thread for normal data generation for vehicle: {VEHICLE_NAME}")
     media_durata_normali = args.mu_normal * args.alpha
     sigma_normali = 1 * args.beta
@@ -169,6 +180,7 @@ def thread_normali(args):
         data_to_send['Timestamp chiusura'] = str(data_to_send['Timestamp chiusura'])
         data_to_send['cluster'] = str(cluster)
         produce_message(data_to_send, topic_name)
+        produced_diagnostics += 1
         time.sleep(durata_normale[0])
 
 
