@@ -14,6 +14,20 @@ import signal
 from train_monitor import TrainMonitor
 
 
+
+# Create a lock object
+lock = threading.Lock()
+
+def synchronized(lock):
+    """ Synchronization decorator. """
+    def wrapper(f):
+        def wrapped(*args, **kwargs):
+            with lock:
+                return f(*args, **kwargs)
+        return wrapped
+    return wrapper
+
+
 # load the copula objects later:
 with open('copula_anomalie.pkl', 'rb') as f:
     copula_anomalie = pickle.load(f)
@@ -54,8 +68,9 @@ def parse_int_list(arg):
         raise argparse.ArgumentTypeError("Arguments must be integers separated by commas")
 
 
+@synchronized(lock)
 def produce_message(data, topic_name):
-    global produced_records, produced_anomalies, produced_diagnostics
+    global produced_records
     """
     Produce a message to Kafka for a specific sensor type.
 
@@ -65,7 +80,11 @@ def produce_message(data, topic_name):
     """
     try:
         producer.produce(topic=topic_name, value=data)  # Send the message to Kafka
-        produced_records += 1
+        if topic_name.endswith('HEALTH'):
+            pass
+        else:
+            produced_records += 1
+
         if produced_records % 50 == 0:
             producer.flush()
         if produced_records % 100 == 0:
@@ -283,6 +302,7 @@ def main():
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
     logger = logging.getLogger(args.container_name+'_'+'producer')
     args.logger = logger
+    args.produce_message_function = produce_message
 
     conf_prod = {
         'bootstrap.servers': args.kafka_broker,
