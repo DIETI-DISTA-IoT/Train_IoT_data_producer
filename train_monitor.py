@@ -1,14 +1,17 @@
-from confluent_kafka import Producer, KafkaException
 import time
 import psutil
 import subprocess
 import threading
 import math
+import socket
+import requests
+
 
 class TrainMonitor(threading.Thread):
 
     def __init__(self, kwargs):
         threading.Thread.__init__(self)
+        self.daemon = True
         self.logger = kwargs.logger
         self.ping_thread_timeout = kwargs.ping_thread_timeout
         self.ping_host = kwargs.ping_host
@@ -17,12 +20,14 @@ class TrainMonitor(threading.Thread):
         self.previous_inbound_measurement_instant = time.time()
         self.previous_outbound_traffic = psutil.net_io_counters().bytes_sent
         self.previous_outbound_measurement_instant = time.time()
+        self.stopme = False
+
 
     def run(self):
-        while True:
+        while not self.stopme:
             self.logger.info(f"CPU: {self.get_cpu_usage()}")
-            self.logger.info(f"Memory: {self.get_memory_usage(self.logger)}")
-            self.logger.info(f"RTT: {self.get_rtt()}")
+            self.logger.info(f"Memory: {self.get_memory_usage()}")
+            self.logger.info(f"RTT: {self.get_rtt_requests()}")
             self.logger.info(f"Inbound traffic: {self.get_inbound_traffic()}")
             self.logger.info(f"Outbound traffic: {self.get_outbound_traffic()}")
             time.sleep(self.probe_frequency_seconds)
@@ -57,6 +62,63 @@ class TrainMonitor(threading.Thread):
                 round_trip_time = None
 
             return round_trip_time
+
+
+
+    def get_rtt_curl(self):
+        while True:
+            try:
+                # Use curl to measure TCP connect time (via proxy if configured)
+                result = subprocess.run(
+                    [
+                        "curl", 
+                        "-s",               # Silent mode
+                        "-o", "/dev/null",   # Discard output
+                        "-w", "%{time_connect}",  # Extract connection time
+                        "--http1.1",         # Avoid HTTP/2 multiplexing
+                        f"http://{self.ping_host}"
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=self.ping_thread_timeout
+                )
+                
+                # Convert seconds to milliseconds
+                round_trip_time = float(result.stdout.strip()) * 1000
+                return round_trip_time
+            
+            except Exception as e:
+                if self.logger:
+                    self.logger.error(f"Error during curl request: {e}")
+                return None
+        
+
+    def get_rtt_python_sockets(self):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(self.ping_thread_timeout)
+            start = time.time()
+            s.connect((self.ping_host, 80))  # Target port 80
+            end = time.time()
+            s.close()
+            # Convert to milliseconds
+            return (end - start) * 1000
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"TCP connection failed: {e}")
+            return None
+
+
+    def get_rtt_requests(self):
+        try:
+            start = time.time()
+            response = requests.get(f"http://{self.ping_host}", timeout=self.ping_thread_timeout)
+            rtt = (time.time() - start) * 1000  # Convert to milliseconds
+            return rtt
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"HTTP request failed: {e}")
+            return None
 
 
     def get_cpu_usage(self):

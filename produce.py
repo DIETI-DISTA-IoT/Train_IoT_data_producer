@@ -11,6 +11,8 @@ import logging
 import json
 import argparse
 import signal
+from train_monitor import TrainMonitor
+
 
 # load the copula objects later:
 with open('copula_anomalie.pkl', 'rb') as f:
@@ -270,6 +272,9 @@ def main():
     parser.add_argument('--anomaly_classes',  type=parse_int_list, default=list(range(0,19)))
     parser.add_argument('--diagnostics_classes', type=parse_int_list, default=list(range(0,15)))
     parser.add_argument('--time_emulation', action='store_true', help='paced production of messages according to event simulatedduration')
+    parser.add_argument('--ping_thread_timeout', type=float, default=5)
+    parser.add_argument('--ping_host', type=str, default="www.google.com")
+    parser.add_argument('--probe_frequency_seconds', type=float, default=2)
 
     args = parser.parse_args()
 
@@ -277,6 +282,7 @@ def main():
 
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
     logger = logging.getLogger(args.container_name+'_'+'producer')
+    args.logger = logger
 
     conf_prod = {
         'bootstrap.servers': args.kafka_broker,
@@ -301,6 +307,7 @@ def main():
     if args.diagnostics_classes != list(range(0,15)):
         diagnostics_generators = get_diagnostics_generators_dict(args.diagnostics_classes)
 
+    train_monitor = TrainMonitor(args)
     anomaly_thread = threading.Thread(target=thread_anomalie, args=(vehicle_args,))
     diagnostics_thread = threading.Thread(target=thread_normali, args=(vehicle_args,))
 
@@ -308,8 +315,6 @@ def main():
     anomaly_thread.daemon = True
     diagnostics_thread.daemon = True
 
-    # Add threads to the list
-    #threads.extend([thread1,thread2])
 
     # Start threads
     logger.info(f"Starting threads...")
@@ -317,12 +322,15 @@ def main():
     stop_threads = False
     anomaly_thread.start()
     diagnostics_thread.start()
+    train_monitor.start()
     
     while not stop_threads:
         time.sleep(0.1)
     logger.info(f"Stopping producing threads...")
     anomaly_thread.join(1)
     diagnostics_thread.join(1)
+    train_monitor.stopme = True
+    train_monitor.join(2)
     logger.info(f"Stopped producing threads.")
 
 if __name__ == '__main__':

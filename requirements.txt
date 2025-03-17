@@ -8,3 +8,5 @@ scipy>=1.14.1
 six>=1.16.0
 tenacity>=9.0.0
 tzdata>=2024.2
+psutil>=7.0.0
+requests>=2.32.3
