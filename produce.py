@@ -105,6 +105,16 @@ def sample_anomaly_from_clusters():
     return cluster_to_sample_from[0], anomaly_generators[cluster_to_sample_from[0]].sample(1)
 
 
+def health_probes_thread(args):
+    logger.info(f"Starting thread for health probes for vehicle: {VEHICLE_NAME}")
+    while not stop_threads:
+        health_dict = train_monitor.probe_health()
+        produce_message(
+            data=health_dict, 
+            topic_name=f"{VEHICLE_NAME}_HEALTH")
+        time.sleep(args.probe_frequency_seconds)
+
+
 def thread_anomalie(args):
     global produced_anomalies
     logger.info(f"Starting thread for anomalies generation for vehicle: {VEHICLE_NAME}")
@@ -277,7 +287,8 @@ def signal_handler(sig, frame):
 
 def main():
     global VEHICLE_NAME, KAFKA_BROKER
-    global producer, logger, anomaly_generators, diagnostics_generators, anomaly_thread, diagnostics_thread, stop_threads
+    global producer, logger, anomaly_generators, diagnostics_generators
+    global anomaly_thread, diagnostics_thread, stop_threads, train_monitor
 
     parser = argparse.ArgumentParser(description='Kafka Producer for Synthetic Vehicle Data')
     parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle')        
@@ -302,7 +313,6 @@ def main():
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
     logger = logging.getLogger(args.container_name+'_'+'producer')
     args.logger = logger
-    args.produce_message_function = produce_message
 
     conf_prod = {
         'bootstrap.servers': args.kafka_broker,
@@ -328,12 +338,14 @@ def main():
         diagnostics_generators = get_diagnostics_generators_dict(args.diagnostics_classes)
 
     train_monitor = TrainMonitor(args)
+    train_monitor_thread = threading.Thread(target=health_probes_thread, args=(args,))
     anomaly_thread = threading.Thread(target=thread_anomalie, args=(vehicle_args,))
     diagnostics_thread = threading.Thread(target=thread_normali, args=(vehicle_args,))
 
     # Set daemon to True
     anomaly_thread.daemon = True
     diagnostics_thread.daemon = True
+    train_monitor_thread.daemon = True
 
 
     # Start threads
@@ -342,16 +354,16 @@ def main():
     stop_threads = False
     anomaly_thread.start()
     diagnostics_thread.start()
-    train_monitor.start()
+    train_monitor_thread.start()
     
     while not stop_threads:
         time.sleep(0.1)
     logger.info(f"Stopping producing threads...")
     anomaly_thread.join(1)
     diagnostics_thread.join(1)
-    train_monitor.stopme = True
-    train_monitor.join(2)
+    train_monitor_thread.join(1)
     logger.info(f"Stopped producing threads.")
+
 
 if __name__ == '__main__':
     main()

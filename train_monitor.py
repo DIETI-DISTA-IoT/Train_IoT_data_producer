@@ -1,7 +1,6 @@
 import time
 import psutil
 import subprocess
-import threading
 import math
 import socket
 import requests
@@ -14,12 +13,10 @@ OUTBOUND = "OUTBOUND"
 HEALTH = "HEALTH"
 
 
-class TrainMonitor(threading.Thread):
+class TrainMonitor():
 
 
     def __init__(self, kwargs):
-        threading.Thread.__init__(self)
-        self.daemon = True
         self.vehicle_name = kwargs.vehicle_name
         self.logger = kwargs.logger
         self.ping_thread_timeout = kwargs.ping_thread_timeout
@@ -30,36 +27,27 @@ class TrainMonitor(threading.Thread):
         self.previous_outbound_traffic = psutil.net_io_counters().bytes_sent
         self.previous_outbound_measurement_instant = time.time()
         self.stopme = False
-        self.produce_message_function = kwargs.produce_message_function
         self.logger.debug(f"TrainMonitor initialized.")
         
 
-    def run(self):
-        self.logger.info(f"Starting TrainMonitor.")
-        while not self.stopme:
+    def probe_health(self):
 
-            health_dict = {
-                self.vehicle_name + "_" + CPU: self.get_cpu_usage(),
-                self.vehicle_name + "_" + MEMORY: self.get_memory_usage(),
-                self.vehicle_name + "_" + RTT: self.get_rtt_requests(),
-                self.vehicle_name + "_" + INBOUND: self.get_inbound_traffic(),
-                self.vehicle_name + "_" + OUTBOUND: self.get_outbound_traffic()
-            }
+        health_dict = {
+            self.vehicle_name + "_" + CPU: self.get_cpu_usage(),
+            self.vehicle_name + "_" + MEMORY: self.get_memory_usage(),
+            self.vehicle_name + "_" + RTT: self.get_rtt_requests(),
+            self.vehicle_name + "_" + INBOUND: self.get_inbound_traffic(),
+            self.vehicle_name + "_" + OUTBOUND: self.get_outbound_traffic()
+        }
 
-            self.logger.debug(f"CPU: {health_dict[self.vehicle_name + '_' + CPU]}")
-            self.logger.debug(f"Memory: {health_dict[self.vehicle_name + '_' + MEMORY]}")
-            self.logger.debug(f"RTT: {health_dict[self.vehicle_name + '_' + RTT]}")
-            self.logger.debug(f"Inbound traffic: {health_dict[self.vehicle_name + '_' + INBOUND]}")
-            self.logger.debug(f"Outbound traffic: {health_dict[self.vehicle_name + '_' + OUTBOUND]}")
+        self.logger.debug(f"CPU: {health_dict[self.vehicle_name + '_' + CPU]}")
+        self.logger.debug(f"Memory: {health_dict[self.vehicle_name + '_' + MEMORY]}")
+        self.logger.debug(f"RTT: {health_dict[self.vehicle_name + '_' + RTT]}")
+        self.logger.debug(f"Inbound traffic: {health_dict[self.vehicle_name + '_' + INBOUND]}")
+        self.logger.debug(f"Outbound traffic: {health_dict[self.vehicle_name + '_' + OUTBOUND]}")
             
-            self.produce_message_function(
-                data=health_dict, 
-                topic_name=self.vehicle_name + "_" + HEALTH)
+        return health_dict
             
-            time.sleep(self.probe_frequency_seconds)
-
-        self.logger.info(f"TrainMonitor halted.")
-
 
     def get_rtt(self):
             try:
