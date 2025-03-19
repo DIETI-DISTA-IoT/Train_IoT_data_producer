@@ -313,7 +313,8 @@ def main():
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
     logger = logging.getLogger(args.container_name+'_'+'producer')
     args.logger = logger
-
+    args.vehicle_name = VEHICLE_NAME
+    
     conf_prod = {
         'bootstrap.servers': args.kafka_broker,
         'key.serializer': StringSerializer('utf_8'),
