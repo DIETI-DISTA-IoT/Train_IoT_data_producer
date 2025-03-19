@@ -70,7 +70,7 @@ class Attack:
             rate = packets_sent / elapsed if elapsed > 0 else 0
             mbps = (bytes_sent * 8 / 1000000) / elapsed if elapsed > 0 else 0
 
-            logger.debug("Attack completed")
+            logger.info("Attack completed")
             logger.debug(f"Duration: {elapsed:.2f} seconds")
             logger.debug(f"Packets sent: {packets_sent}")
             logger.debug(f"Data sent: {bytes_sent/1000000:.2f} MB")
