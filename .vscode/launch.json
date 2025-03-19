@@ -29,7 +29,8 @@
             "justMyCode": false,
             "args": ["--vehicle_name=bob",
                     "--target_ip=172.18.0.16",
-                    "--logging_level=debug"
+                    "--logging_level=debug",
+                    "--duration=0"
                     ]
 
         }

