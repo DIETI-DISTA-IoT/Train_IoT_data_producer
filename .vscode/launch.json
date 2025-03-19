@@ -19,6 +19,19 @@
                     "--mu_normal=1"
                     ]
                     
+        },
+        {
+            "name": "ATTACK",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "attack.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--vehicle_name=bob",
+                    "--target_ip=172.18.0.16",
+                    "--logging_level=debug"
+                    ]
+
         }
     ]
 }
