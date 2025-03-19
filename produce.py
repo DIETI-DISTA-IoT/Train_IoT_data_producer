@@ -12,7 +12,7 @@ import json
 import argparse
 import signal
 from train_monitor import TrainMonitor
-
+import os
 
 
 # Create a lock object
@@ -291,7 +291,6 @@ def main():
     global anomaly_thread, diagnostics_thread, stop_threads, train_monitor
 
     parser = argparse.ArgumentParser(description='Kafka Producer for Synthetic Vehicle Data')
-    parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle')        
     parser.add_argument('--container_name', type=str, default='GENERIC_PRODUCER', help='Name of the container')
     parser.add_argument('--kafka_broker', type=str, default='kafka:9092', help='Kafka broker URL')
     parser.add_argument('--logging_level', type=str, default='INFO', help='Logging level')
@@ -308,7 +307,8 @@ def main():
 
     args = parser.parse_args()
 
-    VEHICLE_NAME = args.vehicle_name
+    VEHICLE_NAME = os.environ.get('VEHICLE_NAME')
+    assert VEHICLE_NAME is not None, "VEHICLE_NAME environment variable must be set"
 
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
     logger = logging.getLogger(args.container_name+'_'+'producer')

@@ -11,7 +11,7 @@
             "program": "produce.py",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": ["--vehicle_name=tom",
+            "args": [
                     "--logging_level=DEBUG",
                     "--anomaly_classes=0,1,2,3",
                     "--diagnostics_classes=6,7,8",
@@ -27,7 +27,7 @@
             "program": "attack.py",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": ["--vehicle_name=bob",
+            "args": [
                     "--target_ip=172.18.0.16",
                     "--logging_level=debug",
                     "--duration=0"

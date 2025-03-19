@@ -3,6 +3,7 @@ import socket
 import time
 import argparse
 import logging
+import os
 
 class Attack:
     def __init__(self, target_ip, target_port=80, duration=60, packet_size=1024, delay=0.001):
@@ -94,7 +95,6 @@ class Attack:
 def main():
     global logger
     parser = argparse.ArgumentParser(description="UDP Flood Attack Script")
-    parser.add_argument('--vehicle_name', type=str, required=True, help='Name of the vehicle') 
     parser.add_argument('--logging_level', type=str, default='INFO', help='Logging level')
     parser.add_argument("--target_ip", help="Target IP address")
     parser.add_argument("--target_port", type=int, default=80, help="Target port (default: 80)")
@@ -103,11 +103,12 @@ def main():
     parser.add_argument("--delay", type=float, default=0.001, help="Delay between packets in seconds (default: 0.001)")
 
     args = parser.parse_args()
-
+    vehicle_name = os.getenv('VEHICLE_NAME')
+    assert vehicle_name is not None, "VEHICLE_NAME environment variable must be set"
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
-    logger = logging.getLogger(args.vehicle_name+'_'+'attacker')
+    logger = logging.getLogger(vehicle_name+'_'+'attacker')
     args.logger = logger
-    logger.info(f"Starting attack from vehicle: {args.vehicle_name}")
+    logger.info(f"Starting attack from vehicle: {vehicle_name}")
 
     attack = Attack(
         target_ip=args.target_ip,
