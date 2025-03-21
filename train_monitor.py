@@ -33,15 +33,16 @@ class TrainMonitor():
     def probe_health(self):
 
         health_dict = {
-            self.vehicle_name + "_" + CPU: self.get_cpu_usage(),
-            self.vehicle_name + "_" + MEMORY: self.get_memory_usage(),
+            # TODO isolate container CPU and Memory usage to make a senseful comparison
+            # self.vehicle_name + "_" + CPU: self.get_cpu_usage(),
+            # self.vehicle_name + "_" + MEMORY: self.get_memory_usage(),
             self.vehicle_name + "_" + RTT: self.get_rtt_requests(),
             self.vehicle_name + "_" + INBOUND: self.get_inbound_traffic(),
             self.vehicle_name + "_" + OUTBOUND: self.get_outbound_traffic()
         }
 
-        self.logger.debug(f"CPU: {health_dict[self.vehicle_name + '_' + CPU]}")
-        self.logger.debug(f"Memory: {health_dict[self.vehicle_name + '_' + MEMORY]}")
+        # self.logger.debug(f"CPU: {health_dict[self.vehicle_name + '_' + CPU]}")
+        # self.logger.debug(f"Memory: {health_dict[self.vehicle_name + '_' + MEMORY]}")
         self.logger.debug(f"RTT: {health_dict[self.vehicle_name + '_' + RTT]}")
         self.logger.debug(f"Inbound traffic: {health_dict[self.vehicle_name + '_' + INBOUND]}")
         self.logger.debug(f"Outbound traffic: {health_dict[self.vehicle_name + '_' + OUTBOUND]}")
