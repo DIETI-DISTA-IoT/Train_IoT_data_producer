@@ -291,7 +291,6 @@ def main():
     global anomaly_thread, diagnostics_thread, stop_threads, train_monitor
 
     parser = argparse.ArgumentParser(description='Kafka Producer for Synthetic Vehicle Data')
-    parser.add_argument('--container_name', type=str, default='GENERIC_PRODUCER', help='Name of the container')
     parser.add_argument('--kafka_broker', type=str, default='kafka:9092', help='Kafka broker URL')
     parser.add_argument('--logging_level', type=str, default='INFO', help='Logging level')
     parser.add_argument('--mu_anomalies', type=float, default=157, help='Mu parameter (mean of the mean interarrival times of anomalies)')
@@ -311,7 +310,7 @@ def main():
     assert VEHICLE_NAME is not None, "VEHICLE_NAME environment variable must be set"
 
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
-    logger = logging.getLogger(args.container_name+'_'+'producer')
+    logger = logging.getLogger(VEHICLE_NAME+'_'+'producer')
     args.logger = logger
     args.vehicle_name = VEHICLE_NAME
     
