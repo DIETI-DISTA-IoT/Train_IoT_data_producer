@@ -27,25 +27,33 @@ class TrainMonitor():
         self.previous_outbound_traffic = psutil.net_io_counters().bytes_sent
         self.previous_outbound_measurement_instant = time.time()
         self.stopme = False
-        self.logger.debug(f"TrainMonitor initialized.")
+        self.metrics = kwargs.probe_metrics
+        self.logger.debug(f"TrainMonitor initialized. Will probe {self.metrics} every {self.probe_frequency_seconds} seconds.")
         
 
     def probe_health(self):
 
-        health_dict = {
-            # TODO isolate container CPU and Memory usage to make a senseful comparison
-            # self.vehicle_name + "_" + CPU: self.get_cpu_usage(),
-            # self.vehicle_name + "_" + MEMORY: self.get_memory_usage(),
-            self.vehicle_name + "_" + RTT: self.get_rtt_requests(),
-            self.vehicle_name + "_" + INBOUND: self.get_inbound_traffic(),
-            self.vehicle_name + "_" + OUTBOUND: self.get_outbound_traffic()
-        }
+        health_dict = {}
 
-        # self.logger.debug(f"CPU: {health_dict[self.vehicle_name + '_' + CPU]}")
-        # self.logger.debug(f"Memory: {health_dict[self.vehicle_name + '_' + MEMORY]}")
-        self.logger.debug(f"RTT: {health_dict[self.vehicle_name + '_' + RTT]}")
-        self.logger.debug(f"Inbound traffic: {health_dict[self.vehicle_name + '_' + INBOUND]}")
-        self.logger.debug(f"Outbound traffic: {health_dict[self.vehicle_name + '_' + OUTBOUND]}")
+        if CPU in self.metrics:
+            health_dict[self.vehicle_name + "_" + CPU] = self.get_cpu_usage()
+            self.logger.debug(f"CPU: {health_dict[self.vehicle_name + '_' + CPU]}")
+
+        if MEMORY in self.metrics:
+            health_dict[self.vehicle_name + "_" + MEMORY] = self.get_memory_usage()
+            self.logger.debug(f"Memory: {health_dict[self.vehicle_name + '_' + MEMORY]}")
+
+        if RTT in self.metrics:
+            health_dict[self.vehicle_name + "_" + RTT] = self.get_rtt_requests()
+            self.logger.debug(f"RTT: {health_dict[self.vehicle_name + '_' + RTT]}")
+
+        if INBOUND in self.metrics:
+            health_dict[self.vehicle_name + "_" + INBOUND] = self.get_inbound_traffic()
+            self.logger.debug(f"Inbound traffic: {health_dict[self.vehicle_name + '_' + INBOUND]}")
+
+        if OUTBOUND in self.metrics:
+            health_dict[self.vehicle_name + "_" + OUTBOUND] = self.get_outbound_traffic()
+            self.logger.debug(f"Outbound traffic: {health_dict[self.vehicle_name + '_' + OUTBOUND]}")
             
         return health_dict
             
