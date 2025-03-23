@@ -60,6 +60,14 @@ all_columns = [
 ] + columns_to_generate + ['Tipo_Evento', 'Tipo_Evento_Classificato']
 
 
+def parse_str_list(arg):
+    # Split the input string by commas and convert each element to int
+    try:
+        return [str(x) for x in arg.split(',')]
+    except ValueError:
+        raise argparse.ArgumentTypeError("Arguments must be strings separated by commas")
+    
+
 def parse_int_list(arg):
     # Split the input string by commas and convert each element to int
     try:
@@ -303,7 +311,7 @@ def main():
     parser.add_argument('--ping_thread_timeout', type=float, default=5)
     parser.add_argument('--ping_host', type=str, default="www.google.com")
     parser.add_argument('--probe_frequency_seconds', type=float, default=2)
-    parser.add_argument('--probe_metrics',  type=parse_int_list, default=['RTT', 'INBOUND', 'OUTBOUND', 'CPU', 'MEM'])
+    parser.add_argument('--probe_metrics',  type=parse_str_list, default=['RTT', 'INBOUND', 'OUTBOUND', 'CPU', 'MEM'])
 
     args = parser.parse_args()
 
