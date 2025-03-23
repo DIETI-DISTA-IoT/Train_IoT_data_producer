@@ -28,7 +28,7 @@ class TrainMonitor():
         self.previous_outbound_measurement_instant = time.time()
         self.stopme = False
         self.metrics = kwargs.probe_metrics
-        self.logger.debug(f"TrainMonitor initialized. Will probe {self.metrics} every {self.probe_frequency_seconds} seconds.")
+        self.logger.info(f"TrainMonitor initialized. Will probe {self.metrics} every {self.probe_frequency_seconds} seconds.")
         
 
     def probe_health(self):
