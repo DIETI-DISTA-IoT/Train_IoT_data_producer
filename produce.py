@@ -355,8 +355,8 @@ def main():
         configure_no_proxy()
 
         
-    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
-    logger = logging.getLogger(VEHICLE_NAME+'_'+'producer')
+    logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
+    logger = logging.getLogger(f'[{VEHICLE_NAME}_PROD]')
     args.logger = logger
     args.vehicle_name = VEHICLE_NAME
     mode = args.mode
