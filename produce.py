@@ -168,6 +168,9 @@ def thread_anomalie(args):
 
         if mode == 'SW':
             health_dict = train_monitor.probe_health()
+            produce_message(
+                data=health_dict, 
+                topic_name=f"{VEHICLE_NAME}_HEALTH")
             attack_label = get_status_locally()
             data_to_send.update(health_dict)
             data_to_send['node_status'] = attack_label
@@ -232,6 +235,9 @@ def thread_normali(args):
         
         if mode == 'SW':
             health_dict = train_monitor.probe_health()
+            produce_message(
+                data=health_dict, 
+                topic_name=f"{VEHICLE_NAME}_HEALTH")
             # attack_label = get_status_from_manager(VEHICLE_NAME)
             attack_label = get_status_locally()
             data_to_send.update(health_dict)
