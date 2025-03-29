@@ -14,6 +14,7 @@ import signal
 from train_monitor import TrainMonitor
 import os
 import requests
+import subprocess
 
 
 # Create a lock object
@@ -167,7 +168,7 @@ def thread_anomalie(args):
 
         if mode == 'SW':
             health_dict = train_monitor.probe_health()
-            attack_label = get_status_from_manager(VEHICLE_NAME)
+            attack_label = get_status_locally()
             data_to_send.update(health_dict)
             data_to_send['node_status'] = attack_label
         
@@ -231,7 +232,8 @@ def thread_normali(args):
         
         if mode == 'SW':
             health_dict = train_monitor.probe_health()
-            attack_label = get_status_from_manager(VEHICLE_NAME)
+            # attack_label = get_status_from_manager(VEHICLE_NAME)
+            attack_label = get_status_locally()
             data_to_send.update(health_dict)
             data_to_send['node_status'] = attack_label
 
@@ -248,6 +250,16 @@ def get_status_from_manager(vehicle_name):
     logger.debug(f"Vehicle-status Response Status Code: {response.status_code}")
     logger.debug(f"Vehicle-status Response Body: {response.text}")
     return response.text
+
+
+def get_status_locally():
+    pid_request_command = 'pgrep -f attack.py'
+    # issue command in this host
+    pid_result = subprocess.run(pid_request_command, shell=True, stdout=subprocess.PIPE)
+    if pid_result.returncode == 0:
+        return 'INFECTED'
+    else:
+        return 'HEALTHY'
 
 
 def adjust_probability(index, probability, main_classes, main_prob, low_prob):
