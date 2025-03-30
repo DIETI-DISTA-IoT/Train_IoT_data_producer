@@ -22,7 +22,6 @@ class TrainMonitor():
         self.ping_thread_timeout = kwargs.ping_thread_timeout
         self.ping_host = kwargs.ping_host
         self.probe_frequency_seconds = kwargs.probe_frequency_seconds
-        self.bw_comp_lapse = kwargs.bw_comp_lapse
         self.stopme = False
         self.metrics = kwargs.probe_metrics
         if kwargs.mode == "OF":
@@ -30,7 +29,15 @@ class TrainMonitor():
         else:
             postfix = f"at each anomalous/diagnostics event"
         self.logger.info(f"TrainMonitor initialized. Will probe {self.metrics} {postfix}")
-        
+        self.reset()
+    
+    
+    def reset(self):
+        self.previous_inbound_traffic = psutil.net_io_counters().bytes_recv
+        self.previous_inbound_measurement_instant = time.time()
+        self.previous_outbound_traffic = psutil.net_io_counters().bytes_sent
+        self.previous_outbound_measurement_instant = time.time()
+
 
     def probe_health(self):
 
@@ -169,18 +176,20 @@ class TrainMonitor():
     def get_inbound_traffic(self):
         try:
             network_stats = psutil.net_io_counters()
+            current_measurement_instant = time.time()
+            current_inbound_traffic = network_stats.bytes_recv
 
-            init_inbound_traffic = network_stats.bytes_recv
+            time_interval = current_measurement_instant - self.previous_inbound_measurement_instant
+            inbound_traffic = current_inbound_traffic - self.previous_inbound_traffic
 
-            time.sleep(self.bw_comp_lapse)
-
-            final_inbound_traffic = network_stats.bytes_recv
-            
-            inbound_traffic = final_inbound_traffic - init_inbound_traffic
-
-            inbound_traffic_per_second = inbound_traffic / self.bw_comp_lapse
-
-            inbound_traffic_per_second = math.floor(inbound_traffic_per_second)
+            if time_interval > 0:
+                inbound_traffic_per_second = inbound_traffic / time_interval
+                inbound_traffic_per_second = math.floor(inbound_traffic_per_second)
+            else:
+                inbound_traffic_per_second = 0
+        
+            self.previous_inbound_traffic = current_inbound_traffic
+            self.previous_inbound_measurement_instant = current_measurement_instant
 
         except Exception as e:
             if self.logger:
@@ -193,19 +202,21 @@ class TrainMonitor():
     def get_outbound_traffic(self):
         try:
             network_stats = psutil.net_io_counters()
-
-            init_outbound_traffic = network_stats.bytes_sent
-
-            time.sleep(self.bw_comp_lapse)
-
+            current_measurement_instant = time.time()
             current_outbound_traffic = network_stats.bytes_sent
 
-            outbound_traffic = current_outbound_traffic - init_outbound_traffic
+            time_interval = current_measurement_instant - self.previous_outbound_measurement_instant
+            outbound_traffic = current_outbound_traffic - self.previous_outbound_traffic
 
-            outbound_traffic_per_second = outbound_traffic / self.bw_comp_lapse
-            
-            outbound_traffic_per_second = math.floor(outbound_traffic_per_second)
-        
+            if time_interval > 0:
+                outbound_traffic_per_second = outbound_traffic / time_interval
+                outbound_traffic_per_second = math.floor(outbound_traffic_per_second)
+            else:
+                outbound_traffic_per_second = 0
+
+            self.previous_outbound_traffic = current_outbound_traffic
+            self.previous_outbound_measurement_instant = current_measurement_instant
+
         except Exception as e: 
             if self.logger:
                 self.logger.error(f"Error during diagnostics outbound traffic volume: {e.message}")

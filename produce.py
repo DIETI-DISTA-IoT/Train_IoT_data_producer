@@ -450,7 +450,6 @@ def main():
     parser.add_argument('--ping_host', type=str, default="www.google.com")
     parser.add_argument('--probe_frequency_seconds', type=float, default=2)
     parser.add_argument('--probe_metrics',  type=parse_str_list, default=['RTT', 'INBOUND', 'OUTBOUND', 'CPU', 'MEM'])
-    parser.add_argument('--bw_comp_lapse', type=float, default=0.4, help="Bandwith measurement period.")
     parser.add_argument('--mode', type=str, default='OF', help='If OF, then functional sensors are separated from health sensors. If SW, sensors are united.')
     parser.add_argument('--manager_port', type=int, default=5000, help='Port of the train manager service')
     parser.add_argument('--no_proxy_host', action='store_true', help='set the host ip among the no_proxy ips.')
@@ -534,6 +533,7 @@ def main():
                 attack_thread.daemon = True
                 attack_thread.start()
                 UNDER_ATTACK = True
+                train_monitor.reset()
                 return 'Attack launched', 200
             else:
                 return 'Aleady under attack!!', 400
@@ -547,6 +547,7 @@ def main():
                 attack.alive = False
                 attack_thread.join(1)
                 UNDER_ATTACK = False
+                train_monitor.reset()
                 return 'Attack stopped', 200
             else:
                 return 'Wasn\'t under attack!!', 400
