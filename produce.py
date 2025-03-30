@@ -99,7 +99,7 @@ class Attack:
             rate = packets_sent / elapsed if elapsed > 0 else 0
             mbps = (bytes_sent * 8 / 1000000) / elapsed if elapsed > 0 else 0
 
-            logger.info("[BOT] Attack completed")
+            logger.info("[BOT] Attack ended")
             logger.debug(f"[BOT] Duration: {elapsed:.2f} seconds")
             logger.debug(f"[BOT] Packets sent: {packets_sent}")
             logger.debug(f"[BOT] Data sent: {bytes_sent/1000000:.2f} MB")
@@ -514,36 +514,43 @@ def main():
     train_monitor_thread = threading.Thread(target=health_probes_thread, args=(args,))
     anomaly_thread = threading.Thread(target=thread_anomalie, args=(vehicle_args,))
     diagnostics_thread = threading.Thread(target=thread_normali, args=(vehicle_args,))
-    attack_thread = threading.Thread(target=attack.start_attack)
-
+    attack_thread = None
     # Set daemon to True
     anomaly_thread.daemon = True
     diagnostics_thread.daemon = True
     train_monitor_thread.daemon = True
-    attack_thread.daemon = True
+    
 
 
     app = Flask(f'{VEHICLE_NAME}_backdoor')
     @app.route('/start-attack', methods=['POST'])
     def start_attack():
-        global UNDER_ATTACK
+        global UNDER_ATTACK, attack_thread
         
         with attack_lock:
-            attack_thread.start()
-            logger.info(f"{VEHICLE_NAME} under attack")
-            UNDER_ATTACK = True
-        return 'Attack launched', 200
+            if not UNDER_ATTACK:
+                attack_thread = threading.Thread(target=attack.start_attack)
+                attack_thread.daemon = True
+                attack_thread.start()
+                UNDER_ATTACK = True
+                return 'Attack launched', 200
+            else:
+                return 'Aleady under attack!!', 400
     
+
     @app.route('/stop-attack', methods=['POST'])
     def stop_attack():
-        global UNDER_ATTACK
+        global UNDER_ATTACK, attack_thread
         with attack_lock:
-            attack.alive = False
-            attack_thread.join(1)
-            logger.info(f"{VEHICLE_NAME} healed")
-            UNDER_ATTACK = False
-        return 'Attack stopped', 200
+            if UNDER_ATTACK:
+                attack.alive = False
+                attack_thread.join(1)
+                UNDER_ATTACK = False
+                return 'Attack stopped', 200
+            else:
+                return 'Wasn\'t under attack!!', 400
     
+
     flask_thread = threading.Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': args.bot_port})
     flask_thread.daemon = True
     flask_thread.start()
@@ -567,9 +574,10 @@ def main():
     logger.info(f"Stopping producing threads...")
     anomaly_thread.join(1)
     diagnostics_thread.join(1)
-    if UNDER_ATTACK:
-        attack.alive = False
-        attack_thread.join(1)
+    with attack_lock:
+        if UNDER_ATTACK:
+            attack.alive = False
+            attack_thread.join(1)
     if mode == 'OF': train_monitor_thread.join(1)
     logger.info(f"Stopped producing threads.")
 
