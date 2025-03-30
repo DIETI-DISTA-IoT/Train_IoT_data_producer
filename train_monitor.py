@@ -140,7 +140,7 @@ class TrainMonitor():
         except Exception as e:
             if self.logger:
                 self.logger.error(f"HTTP request failed: {e}")
-            return None
+            return 900
 
 
     def get_cpu_usage(self):
