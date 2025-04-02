@@ -22,14 +22,22 @@ class TrainMonitor():
         self.ping_thread_timeout = kwargs.ping_thread_timeout
         self.ping_host = kwargs.ping_host
         self.probe_frequency_seconds = kwargs.probe_frequency_seconds
+        self.stopme = False
+        self.metrics = kwargs.probe_metrics
+        if kwargs.mode == "OF":
+            postfix = f"every {self.probe_frequency_seconds} seconds."
+        else:
+            postfix = f"at each anomalous/diagnostics event"
+        self.logger.info(f"TrainMonitor initialized. Will probe {self.metrics} {postfix}")
+        self.reset()
+    
+    
+    def reset(self):
         self.previous_inbound_traffic = psutil.net_io_counters().bytes_recv
         self.previous_inbound_measurement_instant = time.time()
         self.previous_outbound_traffic = psutil.net_io_counters().bytes_sent
         self.previous_outbound_measurement_instant = time.time()
-        self.stopme = False
-        self.metrics = kwargs.probe_metrics
-        self.logger.info(f"TrainMonitor initialized. Will probe {self.metrics} every {self.probe_frequency_seconds} seconds.")
-        
+
 
     def probe_health(self):
 
@@ -140,7 +148,7 @@ class TrainMonitor():
         except Exception as e:
             if self.logger:
                 self.logger.error(f"HTTP request failed: {e}")
-            return None
+            return 900
 
 
     def get_cpu_usage(self):

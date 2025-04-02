@@ -113,8 +113,8 @@ def main():
     args = parser.parse_args()
     vehicle_name = os.getenv('VEHICLE_NAME')
     assert vehicle_name is not None, "VEHICLE_NAME environment variable must be set"
-    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
-    logger = logging.getLogger(vehicle_name+'_'+'attacker')
+    logging.basicConfig(format='%(name)s-%(levelname)s -%(message)s', level=str(args.logging_level).upper())
+    logger = logging.getLogger('['+vehicle_name+'_'+'ATTCK]')
     args.logger = logger
     signal.signal(signal.SIGINT, lambda sig, frame: interrupt_signal_handler(sig, frame))
     logger.info(f"Starting attack from vehicle: {vehicle_name}")

