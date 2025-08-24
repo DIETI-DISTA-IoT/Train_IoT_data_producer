@@ -15,7 +15,7 @@ from train_monitor import TrainMonitor
 import os
 import requests
 import subprocess
-from flask import Flask
+from flask import Flask, request, jsonify
 import socket
 import yaml
 
@@ -432,6 +432,12 @@ def configure_no_proxy():
     os.environ['no_proxy'] = os.environ.get('no_proxy', '') + f",{HOST_IP}"
 
 
+# Global state for API management
+api_config = {}
+api_running = False
+api_threads = []
+api_lock = threading.Lock()
+
 def load_config_from_environment():
     """Load configuration from environment variables"""
     config = {
@@ -578,10 +584,222 @@ def validate_config(config):
     
     return True
 
+def start_producer_threads(config):
+    """Start producer threads with configuration"""
+    global api_threads, api_running
+    
+    with api_lock:
+        if api_running:
+            return False, "Producer is already running"
+        
+        # Create thread arguments from config
+        thread_args = argparse.Namespace(
+            mu_anomalies=config['mu_anomalies'],
+            mu_normal=config['mu_normal'],
+            alpha=config['alpha'],
+            beta=config['beta'],
+            anomaly_classes=config['anomaly_classes'],
+            diagnostics_classes=config['diagnostics_classes'],
+            time_emulation=config['time_emulation'],
+            probe_frequency_seconds=config['probe_frequency_seconds'],
+            ping_thread_timeout=config['ping_thread_timeout'],
+            ping_host=config['ping_host'],
+            probe_metrics=config['probe_metrics']
+        )
+        
+        # Start threads
+        anomaly_thread = threading.Thread(target=thread_anomalie, args=(thread_args,))
+        diagnostics_thread = threading.Thread(target=thread_normali, args=(thread_args,))
+        
+        anomaly_thread.daemon = True
+        diagnostics_thread.daemon = True
+        
+        anomaly_thread.start()
+        diagnostics_thread.start()
+        
+        api_threads = [anomaly_thread, diagnostics_thread]
+        api_running = True
+        
+        return True, "Producer started successfully"
+
+def stop_producer_threads():
+    """Stop all producer threads"""
+    global stop_threads, api_threads, api_running
+    
+    with api_lock:
+        if not api_running:
+            return False, "Producer is not running"
+        
+        stop_threads = True
+        
+        for thread in api_threads:
+            thread.join(timeout=5)
+        
+        api_threads = []
+        api_running = False
+        stop_threads = False  # Reset for next start
+        
+        return True, "Producer stopped successfully"
+
+def create_flask_app():
+    """Create and configure Flask app with API endpoints"""
+    app = Flask(__name__)
+    
+    @app.route('/configure', methods=['POST'])
+    def configure():
+        """Configure the producer with new settings"""
+        global api_config
+        
+        try:
+            new_config = request.json
+            if not new_config:
+                return jsonify({"error": "No configuration provided"}), 400
+            
+            # Validate the new configuration
+            validate_config(new_config)
+            
+            # Update configuration
+            with api_lock:
+                api_config.update(new_config)
+            
+            # Save to file for persistence
+            try:
+                config_to_save = {
+                    'vehicle': {'name': new_config.get('vehicle_name')},
+                    'data_generation': {
+                        'mu_anomalies': new_config.get('mu_anomalies', 157),
+                        'mu_normal': new_config.get('mu_normal', 115),
+                        'alpha': new_config.get('alpha', 0.2),
+                        'beta': new_config.get('beta', 1.9),
+                        'time_emulation': new_config.get('time_emulation', False),
+                        'anomaly_classes': new_config.get('anomaly_classes', list(range(0, 19))),
+                        'diagnostics_classes': new_config.get('diagnostics_classes', list(range(0, 15)))
+                    },
+                    'probe': {
+                        'frequency_seconds': new_config.get('probe_frequency_seconds', 2),
+                        'timeout': new_config.get('ping_thread_timeout', 5),
+                        'host': new_config.get('ping_host', 'www.google.com'),
+                        'metrics': new_config.get('probe_metrics', ['RTT', 'INBOUND', 'OUTBOUND', 'CPU', 'MEM'])
+                    },
+                    'attack': {
+                        'target_ip': new_config.get('target_ip', '172.18.0.4'),
+                        'target_port': new_config.get('target_port', 80),
+                        'duration': new_config.get('duration', 0),
+                        'packet_size': new_config.get('packet_size', 1024),
+                        'delay': new_config.get('delay', 0.001),
+                        'bot_port': new_config.get('bot_port', 5002)
+                    },
+                    'system': {
+                        'mode': new_config.get('mode', 'OF'),
+                        'logging_level': new_config.get('logging_level', 'INFO'),
+                        'manager_port': new_config.get('manager_port', 5000)
+                    }
+                }
+                
+                with open('/app/config.yaml', 'w') as f:
+                    yaml.dump(config_to_save, f)
+            except Exception as e:
+                logger.warning(f"Could not save config to file: {e}")
+            
+            return jsonify({
+                "status": "configured",
+                "config": api_config
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+    @app.route('/start', methods=['POST'])
+    def start_producer():
+        """Start the producer with current configuration"""
+        try:
+            if not api_config:
+                return jsonify({"error": "Not configured"}), 400
+            
+            success, message = start_producer_threads(api_config)
+            if success:
+                return jsonify({
+                    "status": "started",
+                    "vehicle": api_config.get('vehicle_name'),
+                    "message": message
+                })
+            else:
+                return jsonify({"error": message}), 400
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route('/stop', methods=['POST'])
+    def stop_producer():
+        """Stop the producer"""
+        try:
+            success, message = stop_producer_threads()
+            if success:
+                return jsonify({"status": "stopped", "message": message})
+            else:
+                return jsonify({"error": message}), 400
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route('/status', methods=['GET'])
+    def get_status():
+        """Get current status and statistics"""
+        return jsonify({
+            "running": api_running,
+            "vehicle": api_config.get('vehicle_name'),
+            "records_produced": produced_records,
+            "anomalies_produced": produced_anomalies,
+            "diagnostics_produced": produced_diagnostics,
+            "under_attack": UNDER_ATTACK,
+            "config": api_config
+        })
+
+    @app.route('/health', methods=['GET'])
+    def health_check():
+        """Health check endpoint"""
+        return jsonify({
+            "status": "healthy",
+            "running": api_running,
+            "config_loaded": bool(api_config),
+            "vehicle": api_config.get('vehicle_name', 'unknown')
+        })
+
+    @app.route('/config', methods=['GET'])
+    def get_config():
+        """Get current configuration"""
+        return jsonify(api_config)
+
+    @app.route('/config', methods=['PUT'])
+    def update_config():
+        """Update specific configuration parameters"""
+        global api_config
+        
+        try:
+            updates = request.json
+            if not updates:
+                return jsonify({"error": "No updates provided"}), 400
+            
+            # Validate updates
+            test_config = api_config.copy()
+            test_config.update(updates)
+            validate_config(test_config)
+            
+            # Apply updates
+            with api_lock:
+                api_config.update(updates)
+            
+            return jsonify({
+                "status": "updated",
+                "config": api_config
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+    return app
+
 def main():
     global VEHICLE_NAME, MANAGER_PORT, UNDER_ATTACK, attack_lock
     global producer, logger, anomaly_generators, diagnostics_generators
     global anomaly_thread, diagnostics_thread, stop_threads, train_monitor, mode
+    global api_config
 
     # Load configuration from environment variables
     env_config = load_config_from_environment()
@@ -604,6 +822,9 @@ def main():
     MANAGER_PORT = config['manager_port']
     UNDER_ATTACK = False
     mode = config['mode']
+    
+    # Store config for API
+    api_config = config.copy()
 
     # Configure logging
     logging.basicConfig(
@@ -642,21 +863,6 @@ def main():
 
     logger.info(f"Setting up producing threads for vehicle: {VEHICLE_NAME}")
     
-    # Create thread arguments from config
-    vehicle_args = argparse.Namespace(
-        mu_anomalies=config['mu_anomalies'],
-        mu_normal=config['mu_normal'],
-        alpha=config['alpha'],
-        beta=config['beta'],
-        anomaly_classes=config['anomaly_classes'],
-        diagnostics_classes=config['diagnostics_classes'],
-        time_emulation=config['time_emulation'],
-        probe_frequency_seconds=config['probe_frequency_seconds'],
-        ping_thread_timeout=config['ping_thread_timeout'],
-        ping_host=config['ping_host'],
-        probe_metrics=config['probe_metrics']
-    )
-
     # Load generators if needed
     if config['anomaly_classes'] != list(range(0, 19)):
         anomaly_generators = get_anomaly_generators_dict(config['anomaly_classes'])
@@ -664,23 +870,15 @@ def main():
         diagnostics_generators = get_diagnostics_generators_dict(config['diagnostics_classes'])
 
     # Create train monitor
-    train_monitor = TrainMonitor(vehicle_args)
-    
-    # Create threads
-    train_monitor_thread = threading.Thread(target=health_probes_thread, args=(vehicle_args,))
-    anomaly_thread = threading.Thread(target=thread_anomalie, args=(vehicle_args,))
-    diagnostics_thread = threading.Thread(target=thread_normali, args=(vehicle_args,))
-    attack_thread = None
-    
-    # Set daemon to True
-    anomaly_thread.daemon = True
-    diagnostics_thread.daemon = True
-    train_monitor_thread.daemon = True
+    train_monitor = TrainMonitor(argparse.Namespace(**config))
 
-    # Create Flask app for backdoor
-    app = Flask(f'{VEHICLE_NAME}_backdoor')
+    # Create Flask app for API
+    app = create_flask_app()
     
-    @app.route('/start-attack', methods=['POST'])
+    # Create Flask app for backdoor (existing functionality)
+    backdoor_app = Flask(f'{VEHICLE_NAME}_backdoor')
+    
+    @backdoor_app.route('/start-attack', methods=['POST'])
     def start_attack():
         global UNDER_ATTACK, attack_thread
         
@@ -695,7 +893,7 @@ def main():
             else:
                 return 'Already under attack!!', 400
     
-    @app.route('/stop-attack', methods=['POST'])
+    @backdoor_app.route('/stop-attack', methods=['POST'])
     def stop_attack():
         global UNDER_ATTACK, attack_thread
         with attack_lock:
@@ -707,24 +905,22 @@ def main():
                 return 'Attack stopped', 200
             else:
                 return 'Wasn\'t under attack!!', 400
-    
-    @app.route('/health', methods=['GET'])
-    def health():
-        return {
-            'status': 'healthy',
-            'vehicle': VEHICLE_NAME,
-            'running': not stop_threads,
-            'under_attack': UNDER_ATTACK,
-            'records_produced': produced_records
-        }
 
-    # Start Flask thread
-    flask_thread = threading.Thread(
+    # Start Flask threads
+    api_thread = threading.Thread(
         target=app.run, 
+        kwargs={'host': '0.0.0.0', 'port': 5000, 'debug': False}
+    )
+    api_thread.daemon = True
+    api_thread.start()
+    logger.info(f"Producer API started on port 5000")
+    
+    backdoor_thread = threading.Thread(
+        target=backdoor_app.run, 
         kwargs={'host': '0.0.0.0', 'port': config['bot_port']}
     )
-    flask_thread.daemon = True
-    flask_thread.start()
+    backdoor_thread.daemon = True
+    backdoor_thread.start()
     logger.info(f"Backdoor installed at {config['bot_port']}")
     
     # Suppress Flask logs
@@ -734,29 +930,17 @@ def main():
         return
     flask_logger.handle = custom_handle
 
-    # Start threads
-    logger.info(f"Starting threads...")
+    # Set up signal handlers
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame))
-    stop_threads = False
-    anomaly_thread.start()
-    diagnostics_thread.start()
-    if mode == 'OF': 
-        train_monitor_thread.start()
+    signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame))
     
     # Main loop
-    while not stop_threads:
-        time.sleep(0.1)
-    
-    logger.info(f"Stopping producing threads...")
-    anomaly_thread.join(1)
-    diagnostics_thread.join(1)
-    with attack_lock:
-        if UNDER_ATTACK:
-            attack.alive = False
-            attack_thread.join(1)
-    if mode == 'OF': 
-        train_monitor_thread.join(1)
-    logger.info(f"Stopped producing threads.")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("Shutting down producer...")
+        stop_producer_threads()
 
 if __name__ == '__main__':
     main()
