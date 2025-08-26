@@ -1,4 +1,5 @@
 import time
+import logging
 import psutil
 import subprocess
 import math
@@ -18,7 +19,11 @@ class TrainMonitor():
 
     def __init__(self, kwargs):
         self.vehicle_name = kwargs.vehicle_name
-        self.logger = kwargs.logger
+        # Provide a default logger if not supplied in kwargs
+        if hasattr(kwargs, 'logger') and kwargs.logger is not None:
+            self.logger = kwargs.logger
+        else:
+            self.logger = logging.getLogger(f'[{self.vehicle_name}_PROD]')
         self.ping_thread_timeout = kwargs.ping_thread_timeout
         self.ping_host = kwargs.ping_host
         self.probe_frequency_seconds = kwargs.probe_frequency_seconds
