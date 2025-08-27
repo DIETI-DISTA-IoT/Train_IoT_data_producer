@@ -131,6 +131,9 @@ with open('copula_normali.pkl', 'rb') as f:
 produced_records = 0
 produced_anomalies = 0
 produced_diagnostics = 0
+stop_threads = False
+anomaly_generators = {}
+diagnostics_generators = {}
 
 HOST_IP = os.getenv("HOST_IP")
 
@@ -586,7 +589,7 @@ def validate_config(config):
 
 def start_producer_threads(config):
     """Start producer threads with configuration"""
-    global api_threads, api_running
+    global api_threads, api_running, anomaly_generators, diagnostics_generators
     
     with api_lock:
         if api_running:
@@ -607,6 +610,12 @@ def start_producer_threads(config):
             probe_metrics=config['probe_metrics']
         )
         
+        # Ensure generators are loaded based on current config
+        if thread_args.anomaly_classes != list(range(0, 19)):
+            anomaly_generators = get_anomaly_generators_dict(thread_args.anomaly_classes)
+        if thread_args.diagnostics_classes != list(range(0, 15)):
+            diagnostics_generators = get_diagnostics_generators_dict(thread_args.diagnostics_classes)
+
         # Start threads
         anomaly_thread = threading.Thread(target=thread_anomalie, args=(thread_args,))
         diagnostics_thread = threading.Thread(target=thread_normali, args=(thread_args,))
@@ -732,9 +741,14 @@ def create_flask_app():
         """Stop the producer"""
         try:
             success, message = stop_producer_threads()
+            # Make this endpoint idempotent: return 200 even if already stopped
             if success:
                 return jsonify({"status": "stopped", "message": message})
             else:
+                # Normalize message and respond 200 if it's just not running
+                normalized = str(message).lower()
+                if "not running" in normalized or "already" in normalized:
+                    return jsonify({"status": "already_stopped", "message": message})
                 return jsonify({"error": message}), 400
         except Exception as e:
             return jsonify({"error": str(e)}), 500
