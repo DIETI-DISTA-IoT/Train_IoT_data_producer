@@ -18,6 +18,8 @@ import subprocess
 from flask import Flask, request, jsonify
 import socket
 import yaml
+from OpenFAIR.container_api import ContainerAPI
+BASE_DIR = os.path.dirname(__file__)
 
 
 class Attack:
@@ -122,10 +124,10 @@ def synchronized(lock):
 
 
 # load the copula objects later:
-with open('copula_anomalie.pkl', 'rb') as f:
+with open(os.path.join(BASE_DIR, 'copula_anomalie.pkl'), 'rb') as f:
     copula_anomalie = pickle.load(f)
 
-with open('copula_normali.pkl', 'rb') as f:
+with open(os.path.join(BASE_DIR, 'copula_normali.pkl'), 'rb') as f:
     copula_normali = pickle.load(f)
 
 produced_records = 0
@@ -138,8 +140,8 @@ diagnostics_generators = {}
 HOST_IP = os.getenv("HOST_IP")
 
 # load the probabilities of the classes:
-anomaly_probabilities = pd.read_csv('generators/anomaly_cluster_probabilities.csv')
-diagnostics_probabilities = pd.read_csv('generators/diagnostics_cluster_probabilities.csv')
+anomaly_probabilities = pd.read_csv(os.path.join(BASE_DIR, 'generators', 'anomaly_cluster_probabilities.csv'))
+diagnostics_probabilities = pd.read_csv(os.path.join(BASE_DIR, 'generators', 'diagnostics_cluster_probabilities.csv'))
 
 # Constants:
 columns_to_generate = [
@@ -411,7 +413,7 @@ def get_anomaly_generators_dict(anomaly_classes):
     normalize_anomaly_probabilities(anomaly_classes)
     anomaly_generators = {}
     for anomaly_class in range(0,19):
-        with open(f'generators/anomalies/copula_anomalie_cluster_{anomaly_class}.pkl', 'rb') as f:
+        with open(os.path.join(BASE_DIR, 'generators', 'anomalies', f'copula_anomalie_cluster_{anomaly_class}.pkl'), 'rb') as f:
             anomaly_generators[anomaly_class] = pickle.load(f)
     return anomaly_generators
 
@@ -420,7 +422,7 @@ def get_diagnostics_generators_dict(diagnostics_classes):
     normalize_diagnostics_probabilities(diagnostics_classes)
     diagnostics_generators = {}
     for diagnostics_class in range(0,15):
-        with open(f'generators/diagnostics/copula_normal_cluster_{diagnostics_class}.pkl', 'rb') as f:
+        with open(os.path.join(BASE_DIR, 'generators', 'diagnostics', f'copula_normal_cluster_{diagnostics_class}.pkl'), 'rb') as f:
             diagnostics_generators[diagnostics_class] = pickle.load(f)
     return diagnostics_generators
 
@@ -650,113 +652,38 @@ def stop_producer_threads():
         
         return True, "Producer stopped successfully"
 
-def create_flask_app():
-    """Create and configure Flask app with API endpoints"""
-    app = Flask(__name__)
-    
-    @app.route('/configure', methods=['POST'])
-    def configure():
-        """Configure the producer with new settings"""
+class ProducerAPI(ContainerAPI):
+    def __init__(self, container_name: str, port: int = 5000):
+        super().__init__(container_type='producer', container_name=container_name, port=port)
+
+    def validate_config(self, config):
+        # Reuse existing validator
+        validate_config(config)
+        return True
+
+    def handle_start(self, data):
         global api_config
-        
-        try:
-            new_config = request.json
-            if not new_config:
-                return jsonify({"error": "No configuration provided"}), 400
-            
-            # Validate the new configuration
-            validate_config(new_config)
-            
-            # Update configuration
-            with api_lock:
-                api_config.update(new_config)
-            
-            # Save to file for persistence
-            try:
-                config_to_save = {
-                    'vehicle': {'name': new_config.get('vehicle_name')},
-                    'data_generation': {
-                        'mu_anomalies': new_config.get('mu_anomalies', 157),
-                        'mu_normal': new_config.get('mu_normal', 115),
-                        'alpha': new_config.get('alpha', 0.2),
-                        'beta': new_config.get('beta', 1.9),
-                        'time_emulation': new_config.get('time_emulation', False),
-                        'anomaly_classes': new_config.get('anomaly_classes', list(range(0, 19))),
-                        'diagnostics_classes': new_config.get('diagnostics_classes', list(range(0, 15)))
-                    },
-                    'probe': {
-                        'frequency_seconds': new_config.get('probe_frequency_seconds', 2),
-                        'timeout': new_config.get('ping_thread_timeout', 5),
-                        'host': new_config.get('ping_host', 'www.google.com'),
-                        'metrics': new_config.get('probe_metrics', ['RTT', 'INBOUND', 'OUTBOUND', 'CPU', 'MEM'])
-                    },
-                    'attack': {
-                        'target_ip': new_config.get('target_ip', '172.18.0.4'),
-                        'target_port': new_config.get('target_port', 80),
-                        'duration': new_config.get('duration', 0),
-                        'packet_size': new_config.get('packet_size', 1024),
-                        'delay': new_config.get('delay', 0.001),
-                        'bot_port': new_config.get('bot_port', 5002)
-                    },
-                    'system': {
-                        'mode': new_config.get('mode', 'OF'),
-                        'logging_level': new_config.get('logging_level', 'INFO'),
-                        'manager_port': new_config.get('manager_port', 5000)
-                    }
-                }
-                
-                with open('/app/config.yaml', 'w') as f:
-                    yaml.dump(config_to_save, f)
-            except Exception as e:
-                logger.warning(f"Could not save config to file: {e}")
-            
-            return jsonify({
-                "status": "configured",
-                "config": api_config
-            })
-        except Exception as e:
-            return jsonify({"error": str(e)}), 400
+        if not self.config:
+            raise ValueError("Not configured")
+        with api_lock:
+            api_config.update(self.config)
+        success, message = start_producer_threads(api_config)
+        if not success:
+            raise RuntimeError(message)
+        return {"vehicle": api_config.get('vehicle_name'), "message": message}
 
-    @app.route('/start', methods=['POST'])
-    def start_producer():
-        """Start the producer with current configuration"""
-        try:
-            if not api_config:
-                return jsonify({"error": "Not configured"}), 400
-            
-            success, message = start_producer_threads(api_config)
-            if success:
-                return jsonify({
-                    "status": "started",
-                    "vehicle": api_config.get('vehicle_name'),
-                    "message": message
-                })
-            else:
-                return jsonify({"error": message}), 400
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+    def handle_stop(self, data):
+        success, message = stop_producer_threads()
+        # Make idempotent: treat already-stopped as success
+        if not success:
+            normalized = str(message).lower()
+            if "not running" in normalized or "already" in normalized:
+                return {"status": "already_stopped", "message": message}
+            raise RuntimeError(message)
+        return {"message": message}
 
-    @app.route('/stop', methods=['POST'])
-    def stop_producer():
-        """Stop the producer"""
-        try:
-            success, message = stop_producer_threads()
-            # Make this endpoint idempotent: return 200 even if already stopped
-            if success:
-                return jsonify({"status": "stopped", "message": message})
-            else:
-                # Normalize message and respond 200 if it's just not running
-                normalized = str(message).lower()
-                if "not running" in normalized or "already" in normalized:
-                    return jsonify({"status": "already_stopped", "message": message})
-                return jsonify({"error": message}), 400
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-
-    @app.route('/status', methods=['GET'])
-    def get_status():
-        """Get current status and statistics"""
-        return jsonify({
+    def get_detailed_status(self):
+        return {
             "running": api_running,
             "vehicle": api_config.get('vehicle_name'),
             "records_produced": produced_records,
@@ -764,50 +691,7 @@ def create_flask_app():
             "diagnostics_produced": produced_diagnostics,
             "under_attack": UNDER_ATTACK,
             "config": api_config
-        })
-
-    @app.route('/health', methods=['GET'])
-    def health_check():
-        """Health check endpoint"""
-        return jsonify({
-            "status": "healthy",
-            "running": api_running,
-            "config_loaded": bool(api_config),
-            "vehicle": api_config.get('vehicle_name', 'unknown')
-        })
-
-    @app.route('/config', methods=['GET'])
-    def get_config():
-        """Get current configuration"""
-        return jsonify(api_config)
-
-    @app.route('/config', methods=['PUT'])
-    def update_config():
-        """Update specific configuration parameters"""
-        global api_config
-        
-        try:
-            updates = request.json
-            if not updates:
-                return jsonify({"error": "No updates provided"}), 400
-            
-            # Validate updates
-            test_config = api_config.copy()
-            test_config.update(updates)
-            validate_config(test_config)
-            
-            # Apply updates
-            with api_lock:
-                api_config.update(updates)
-            
-            return jsonify({
-                "status": "updated",
-                "config": api_config
-            })
-        except Exception as e:
-            return jsonify({"error": str(e)}), 400
-
-    return app
+        }
 
 def main():
     global VEHICLE_NAME, MANAGER_PORT, UNDER_ATTACK, attack_lock
@@ -886,8 +770,14 @@ def main():
     # Create train monitor
     train_monitor = TrainMonitor(argparse.Namespace(**config))
 
-    # Create Flask app for API
-    app = create_flask_app()
+    # Create API using generic ContainerAPI subclass
+    api = ProducerAPI(container_name=VEHICLE_NAME, port=5000)
+    # Preload with merged, validated config
+    api.validate_config(config)
+    with api_lock:
+        api_config.update(config)
+    api.config.update(config)
+    api.configured = True
     
     # Create Flask app for backdoor (existing functionality)
     backdoor_app = Flask(f'{VEHICLE_NAME}_backdoor')
@@ -922,8 +812,8 @@ def main():
 
     # Start Flask threads
     api_thread = threading.Thread(
-        target=app.run, 
-        kwargs={'host': '0.0.0.0', 'port': 5000, 'debug': False}
+        target=api.run,
+        kwargs={}
     )
     api_thread.daemon = True
     api_thread.start()

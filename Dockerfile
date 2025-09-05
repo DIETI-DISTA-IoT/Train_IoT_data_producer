@@ -13,21 +13,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY . /app
 
+# Ensure Python can import project-local modules
+ENV PYTHONPATH=/app
+
 # Set environment variables for Kafka connection
 # KAFKA_BROKER: Address of the Kafka broker
 # TOPIC_NAME: Kafka topic to which the synthetic data will be published
 ENV KAFKA_BROKER="kafka:9092"
 ENV VEHICLE_NAME="e700_4801"
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 
 # Upgrade pip to the latest version
 RUN pip install --no-cache-dir --upgrade pip
 
 # Install the dependencies for our Flask producer
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r producer/requirements.txt
 
 # Expose API ports
 EXPOSE 5000
 
 # Default command runs the Flask-enabled producer
-CMD ["python", "produce.py"]
+CMD ["python", "producer/produce.py"]
