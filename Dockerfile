@@ -15,6 +15,8 @@ ARG CACHE_BUST=1
 
 # Set workdir and copy current project producer code
 RUN git clone https://github.com/DIETI-DISTA-IoT/Train_IoT_data_producer.git /app/producer
+RUN ls && git clone https://github.com/DIETI-DISTA-IoT/of-core app/OpenFAIR/
+
 WORKDIR /app
 
 # Ensure Python can import project-local modules
