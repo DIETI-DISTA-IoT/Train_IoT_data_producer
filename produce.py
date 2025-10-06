@@ -15,8 +15,11 @@ from train_monitor import TrainMonitor
 import os
 import requests
 import subprocess
-from flask import Flask
+from flask import Flask, request, jsonify
 import socket
+import yaml
+from OpenFAIR.container_api import ContainerAPI
+BASE_DIR = os.path.dirname(__file__)
 
 
 class Attack:
@@ -121,21 +124,24 @@ def synchronized(lock):
 
 
 # load the copula objects later:
-with open('copula_anomalie.pkl', 'rb') as f:
+with open(os.path.join(BASE_DIR, 'copula_anomalie.pkl'), 'rb') as f:
     copula_anomalie = pickle.load(f)
 
-with open('copula_normali.pkl', 'rb') as f:
+with open(os.path.join(BASE_DIR, 'copula_normali.pkl'), 'rb') as f:
     copula_normali = pickle.load(f)
 
 produced_records = 0
 produced_anomalies = 0
 produced_diagnostics = 0
+stop_threads = False
+anomaly_generators = {}
+diagnostics_generators = {}
 
 HOST_IP = os.getenv("HOST_IP")
 
 # load the probabilities of the classes:
-anomaly_probabilities = pd.read_csv('generators/anomaly_cluster_probabilities.csv')
-diagnostics_probabilities = pd.read_csv('generators/diagnostics_cluster_probabilities.csv')
+anomaly_probabilities = pd.read_csv(os.path.join(BASE_DIR, 'generators', 'anomaly_cluster_probabilities.csv'))
+diagnostics_probabilities = pd.read_csv(os.path.join(BASE_DIR, 'generators', 'diagnostics_cluster_probabilities.csv'))
 
 # Constants:
 columns_to_generate = [
@@ -407,7 +413,7 @@ def get_anomaly_generators_dict(anomaly_classes):
     normalize_anomaly_probabilities(anomaly_classes)
     anomaly_generators = {}
     for anomaly_class in range(0,19):
-        with open(f'generators/anomalies/copula_anomalie_cluster_{anomaly_class}.pkl', 'rb') as f:
+        with open(os.path.join(BASE_DIR, 'generators', 'anomalies', f'copula_anomalie_cluster_{anomaly_class}.pkl'), 'rb') as f:
             anomaly_generators[anomaly_class] = pickle.load(f)
     return anomaly_generators
 
@@ -416,7 +422,7 @@ def get_diagnostics_generators_dict(diagnostics_classes):
     normalize_diagnostics_probabilities(diagnostics_classes)
     diagnostics_generators = {}
     for diagnostics_class in range(0,15):
-        with open(f'generators/diagnostics/copula_normal_cluster_{diagnostics_class}.pkl', 'rb') as f:
+        with open(os.path.join(BASE_DIR, 'generators', 'diagnostics', f'copula_normal_cluster_{diagnostics_class}.pkl'), 'rb') as f:
             diagnostics_generators[diagnostics_class] = pickle.load(f)
     return diagnostics_generators
 
@@ -431,99 +437,352 @@ def configure_no_proxy():
     os.environ['no_proxy'] = os.environ.get('no_proxy', '') + f",{HOST_IP}"
 
 
+# Global state for API management
+api_config = {}
+api_running = False
+api_threads = []
+api_lock = threading.Lock()
+
+def load_config_from_environment():
+    """Load configuration from environment variables"""
+    config = {
+        'vehicle_name': os.getenv('VEHICLE_NAME'),
+        'kafka_broker': os.getenv('KAFKA_BROKER', 'kafka:9092'),
+        'logging_level': os.getenv('LOGGING_LEVEL', 'INFO'),
+        'manager_port': int(os.getenv('MANAGER_PORT', '5000')),
+        'mode': os.getenv('MODE', 'OF'),
+        
+        # Network configuration
+        'target_ip': os.getenv('TARGET_IP', '172.18.0.4'),
+        'target_port': int(os.getenv('TARGET_PORT', '80')),
+        'bot_port': int(os.getenv('BOT_PORT', '5002')),
+        
+        # Timing parameters
+        'probe_frequency_seconds': float(os.getenv('PROBE_FREQUENCY_SECONDS', '2')),
+        'ping_thread_timeout': float(os.getenv('PING_THREAD_TIMEOUT', '5')),
+        'ping_host': os.getenv('PING_HOST', 'www.google.com'),
+        
+        # Attack parameters
+        'duration': int(os.getenv('DURATION', '0')),
+        'packet_size': int(os.getenv('PACKET_SIZE', '1024')),
+        'delay': float(os.getenv('DELAY', '0.001')),
+        
+        # Data generation parameters
+        'mu_anomalies': float(os.getenv('MU_ANOMALIES', '157')),
+        'mu_normal': float(os.getenv('MU_NORMAL', '115')),
+        'alpha': float(os.getenv('ALPHA', '0.2')),
+        'beta': float(os.getenv('BETA', '1.9')),
+        'time_emulation': os.getenv('TIME_EMULATION', 'false').lower() == 'true',
+        
+        # Probe metrics
+        'probe_metrics': os.getenv('PROBE_METRICS', 'RTT,INBOUND,OUTBOUND,CPU,MEM').split(','),
+        
+        # Default anomaly and diagnostics classes
+        'anomaly_classes': list(range(0, 19)),
+        'diagnostics_classes': list(range(0, 15))
+    }
+    
+    # Validate required environment variables
+    if not config['vehicle_name']:
+        raise ValueError("VEHICLE_NAME environment variable must be set")
+    
+    return config
+
+def load_config_from_file(config_path='/app/config.yaml'):
+    """Load configuration from YAML file"""
+    try:
+        with open(config_path, 'r') as f:
+            file_config = yaml.safe_load(f)
+        
+        # Convert file config to our format
+        config = {}
+        
+        if 'vehicle' in file_config:
+            config['vehicle_name'] = file_config['vehicle'].get('name')
+        
+        if 'data_generation' in file_config:
+            dg = file_config['data_generation']
+            config.update({
+                'mu_anomalies': dg.get('mu_anomalies', 157),
+                'mu_normal': dg.get('mu_normal', 115),
+                'alpha': dg.get('alpha', 0.2),
+                'beta': dg.get('beta', 1.9),
+                'time_emulation': dg.get('time_emulation', False),
+                'anomaly_classes': dg.get('anomaly_classes', list(range(0, 19))),
+                'diagnostics_classes': dg.get('diagnostics_classes', list(range(0, 15)))
+            })
+        
+        if 'probe' in file_config:
+            probe = file_config['probe']
+            config.update({
+                'probe_frequency_seconds': probe.get('frequency_seconds', 2),
+                'ping_thread_timeout': probe.get('timeout', 5),
+                'ping_host': probe.get('host', 'www.google.com'),
+                'probe_metrics': probe.get('metrics', ['RTT', 'INBOUND', 'OUTBOUND', 'CPU', 'MEM'])
+            })
+        
+        if 'attack' in file_config:
+            attack = file_config['attack']
+            config.update({
+                'target_ip': attack.get('target_ip', '172.18.0.4'),
+                'target_port': attack.get('target_port', 80),
+                'duration': attack.get('duration', 0),
+                'packet_size': attack.get('packet_size', 1024),
+                'delay': attack.get('delay', 0.001),
+                'bot_port': attack.get('bot_port', 5002)
+            })
+        
+        if 'system' in file_config:
+            system = file_config['system']
+            config.update({
+                'mode': system.get('mode', 'OF'),
+                'logging_level': system.get('logging_level', 'INFO'),
+                'manager_port': system.get('manager_port', 5000)
+            })
+        
+        return config
+    except FileNotFoundError:
+        print(f"Config file {config_path} not found, using environment variables only")
+        return {}
+    except yaml.YAMLError as e:
+        print(f"Error parsing config file: {e}")
+        return {}
+
+def merge_configs(env_config, file_config):
+    """Merge environment and file configurations, with environment taking precedence"""
+    merged = env_config.copy()
+    
+    # Override with file config values (if not set in environment)
+    for key, value in file_config.items():
+        if key not in merged or merged[key] is None:
+            merged[key] = value
+    
+    return merged
+
+def validate_config(config):
+    """Validate configuration parameters"""
+    # Check required fields
+    required_fields = ['vehicle_name', 'kafka_broker']
+    for field in required_fields:
+        if not config.get(field):
+            raise ValueError(f"Missing required configuration field: {field}")
+    
+    # Validate numeric ranges
+    if not (0 < config.get('mu_anomalies', 0) < 1000):
+        raise ValueError("mu_anomalies must be between 0 and 1000")
+    
+    if not (0 < config.get('mu_normal', 0) < 1000):
+        raise ValueError("mu_normal must be between 0 and 1000")
+    
+    if not (0 < config.get('alpha', 0) < 10):
+        raise ValueError("alpha must be between 0 and 10")
+    
+    if not (0 < config.get('beta', 0) < 10):
+        raise ValueError("beta must be between 0 and 10")
+    
+    # Validate port numbers
+    if not (1 <= config.get('target_port', 0) <= 65535):
+        raise ValueError("target_port must be between 1 and 65535")
+    
+    if not (1 <= config.get('bot_port', 0) <= 65535):
+        raise ValueError("bot_port must be between 1 and 65535")
+    
+    return True
+
+def start_producer_threads(config):
+    """Start producer threads with configuration"""
+    global api_threads, api_running, anomaly_generators, diagnostics_generators
+    
+    with api_lock:
+        if api_running:
+            return False, "Producer is already running"
+        
+        # Create thread arguments from config
+        thread_args = argparse.Namespace(
+            mu_anomalies=config['mu_anomalies'],
+            mu_normal=config['mu_normal'],
+            alpha=config['alpha'],
+            beta=config['beta'],
+            anomaly_classes=config['anomaly_classes'],
+            diagnostics_classes=config['diagnostics_classes'],
+            time_emulation=config['time_emulation'],
+            probe_frequency_seconds=config['probe_frequency_seconds'],
+            ping_thread_timeout=config['ping_thread_timeout'],
+            ping_host=config['ping_host'],
+            probe_metrics=config['probe_metrics']
+        )
+        
+        # Ensure generators are loaded based on current config
+        if thread_args.anomaly_classes != list(range(0, 19)):
+            anomaly_generators = get_anomaly_generators_dict(thread_args.anomaly_classes)
+        if thread_args.diagnostics_classes != list(range(0, 15)):
+            diagnostics_generators = get_diagnostics_generators_dict(thread_args.diagnostics_classes)
+
+        # Start threads
+        anomaly_thread = threading.Thread(target=thread_anomalie, args=(thread_args,))
+        diagnostics_thread = threading.Thread(target=thread_normali, args=(thread_args,))
+        
+        anomaly_thread.daemon = True
+        diagnostics_thread.daemon = True
+        
+        anomaly_thread.start()
+        diagnostics_thread.start()
+        
+        api_threads = [anomaly_thread, diagnostics_thread]
+        api_running = True
+        
+        return True, "Producer started successfully"
+
+def stop_producer_threads():
+    """Stop all producer threads"""
+    global stop_threads, api_threads, api_running
+    
+    with api_lock:
+        if not api_running:
+            return False, "Producer is not running"
+        
+        stop_threads = True
+        
+        for thread in api_threads:
+            thread.join(timeout=5)
+        
+        api_threads = []
+        api_running = False
+        stop_threads = False  # Reset for next start
+        
+        return True, "Producer stopped successfully"
+
+class ProducerAPI(ContainerAPI):
+    def __init__(self, container_name: str, port: int = 5000):
+        super().__init__(container_type='producer', container_name=container_name, port=port)
+
+    def validate_config(self, config):
+        # Reuse existing validator
+        validate_config(config)
+        return True
+
+    def handle_start(self, data):
+        global api_config
+        if not self.config:
+            raise ValueError("Not configured")
+        with api_lock:
+            api_config.update(self.config)
+        success, message = start_producer_threads(api_config)
+        if not success:
+            raise RuntimeError(message)
+        return {"vehicle": api_config.get('vehicle_name'), "message": message}
+
+    def handle_stop(self, data):
+        success, message = stop_producer_threads()
+        # Make idempotent: treat already-stopped as success
+        if not success:
+            normalized = str(message).lower()
+            if "not running" in normalized or "already" in normalized:
+                return {"status": "already_stopped", "message": message}
+            raise RuntimeError(message)
+        return {"message": message}
+
+    def get_detailed_status(self):
+        return {
+            "running": api_running,
+            "vehicle": api_config.get('vehicle_name'),
+            "records_produced": produced_records,
+            "anomalies_produced": produced_anomalies,
+            "diagnostics_produced": produced_diagnostics,
+            "under_attack": UNDER_ATTACK,
+            "config": api_config
+        }
+
 def main():
     global VEHICLE_NAME, MANAGER_PORT, UNDER_ATTACK, attack_lock
     global producer, logger, anomaly_generators, diagnostics_generators
     global anomaly_thread, diagnostics_thread, stop_threads, train_monitor, mode
+    global api_config
 
-    parser = argparse.ArgumentParser(description='Kafka Producer for Synthetic Vehicle Data')
-    parser.add_argument('--kafka_broker', type=str, default='kafka:9092', help='Kafka broker URL')
-    parser.add_argument('--logging_level', type=str, default='INFO', help='Logging level')
-    parser.add_argument('--mu_anomalies', type=float, default=157, help='Mu parameter (mean of the mean interarrival times of anomalies)')
-    parser.add_argument('--mu_normal', type=float, default=115, help='Mu parameter (mean of the mean interarrival times of normal data)')
-    parser.add_argument('--alpha', type=float, default=0.2, help='Alpha parameter (scaling factor of the mean interarrival times of both anomalies and normal data)')
-    parser.add_argument('--beta', type=float, default=1.9, help='Beta parameter (scaling factor of std dev of interarrival times of both anomalies and normal data)')
-    parser.add_argument('--anomaly_classes',  type=parse_int_list, default=list(range(0,19)))
-    parser.add_argument('--diagnostics_classes', type=parse_int_list, default=list(range(0,15)))
-    parser.add_argument('--time_emulation', action='store_true', help='paced production of messages according to event simulatedduration')
-    parser.add_argument('--ping_thread_timeout', type=float, default=5)
-    parser.add_argument('--ping_host', type=str, default="www.google.com")
-    parser.add_argument('--probe_frequency_seconds', type=float, default=2)
-    parser.add_argument('--probe_metrics',  type=parse_str_list, default=['RTT', 'INBOUND', 'OUTBOUND', 'CPU', 'MEM'])
-    parser.add_argument('--mode', type=str, default='OF', help='If OF, then functional sensors are separated from health sensors. If SW, sensors are united.')
-    parser.add_argument('--manager_port', type=int, default=5000, help='Port of the train manager service')
-    parser.add_argument('--no_proxy_host', action='store_true', help='set the host ip among the no_proxy ips.')
-    parser.add_argument("--target_ip", type=str, default='172.18.0.4', help="Target IP address")
-    parser.add_argument("--target_port", type=int, default=80, help="Target port (default: 80)")
-    parser.add_argument("--duration", type=int, default=0, help="Duration of the attack in seconds (default: 60)")
-    parser.add_argument("--packet_size", type=int, default=1024, help="Size of each packet in bytes (default: 1024)")
-    parser.add_argument("--delay", type=float, default=0.001, help="Delay between packets in seconds (default: 0.001)")
-    parser.add_argument("--bot_port", type=int, default=5002, help="Backdoor port for attacks")
-
-    args = parser.parse_args()
-
-    MANAGER_PORT = args.manager_port
+    # Load configuration from environment variables
+    env_config = load_config_from_environment()
+    
+    # Load configuration from file
+    file_config = load_config_from_file()
+    
+    # Merge configurations
+    config = merge_configs(env_config, file_config)
+    
+    # Validate configuration
+    try:
+        validate_config(config)
+    except ValueError as e:
+        print(f"Configuration error: {e}")
+        return 1
+    
+    # Set global variables from config
+    VEHICLE_NAME = config['vehicle_name']
+    MANAGER_PORT = config['manager_port']
     UNDER_ATTACK = False
-
-    VEHICLE_NAME = os.environ.get('VEHICLE_NAME')
-    assert VEHICLE_NAME is not None, "VEHICLE_NAME environment variable must be set"
-
-    if args.no_proxy_host:
-        configure_no_proxy()
-
+    mode = config['mode']
     
-    logging.basicConfig(format='%(name)s-%(levelname)s-%(message)s', level=str(args.logging_level).upper())
+    # Store config for API
+    api_config = config.copy()
+
+    # Configure logging
+    logging.basicConfig(
+        format='%(name)s-%(levelname)s-%(message)s', 
+        level=str(config['logging_level']).upper()
+    )
     logger = logging.getLogger(f'[{VEHICLE_NAME}_PROD]')
-    args.logger = logger
-    args.vehicle_name = VEHICLE_NAME
-    mode = args.mode
     
+    # Log configuration summary
+    logger.info(f"Starting producer for vehicle: {VEHICLE_NAME}")
+    logger.info(f"Mode: {mode}")
+    logger.info(f"Kafka broker: {config['kafka_broker']}")
+    logger.info(f"Manager port: {config['manager_port']}")
+    
+    # Configure no proxy if needed
+    if os.getenv('no_proxy_host'):
+        configure_no_proxy()
+    
+    # Create Kafka producer
     conf_prod = {
-        'bootstrap.servers': args.kafka_broker,
+        'bootstrap.servers': config['kafka_broker'],
         'key.serializer': StringSerializer('utf_8'),
         'value.serializer': lambda x, ctx: json.dumps(x).encode('utf-8')
     }
     producer = SerializingProducer(conf_prod)
 
+    # Create attack object
     attack_lock = threading.Lock()
     attack = Attack(
-        target_ip=args.target_ip,
-        target_port=args.target_port,
-        duration=args.duration,
-        packet_size=args.packet_size,
-        delay=args.delay
+        target_ip=config['target_ip'],
+        target_port=config['target_port'],
+        duration=config['duration'],
+        packet_size=config['packet_size'],
+        delay=config['delay']
     )
 
     logger.info(f"Setting up producing threads for vehicle: {VEHICLE_NAME}")
-    vehicle_args=argparse.Namespace(
-        mu_anomalies=args.mu_anomalies,
-        mu_normal=args.mu_normal,
-        alpha=args.alpha,
-        beta=args.beta,
-        anomaly_classes=args.anomaly_classes,
-        diagnostics_classes=args.diagnostics_classes,
-        time_emulation=args.time_emulation
-    )
-
-    if args.anomaly_classes != list(range(0,19)):
-        anomaly_generators = get_anomaly_generators_dict(args.anomaly_classes)
-    if args.diagnostics_classes != list(range(0,15)):
-        diagnostics_generators = get_diagnostics_generators_dict(args.diagnostics_classes)
-
-    train_monitor = TrainMonitor(args)
-    train_monitor_thread = threading.Thread(target=health_probes_thread, args=(args,))
-    anomaly_thread = threading.Thread(target=thread_anomalie, args=(vehicle_args,))
-    diagnostics_thread = threading.Thread(target=thread_normali, args=(vehicle_args,))
-    attack_thread = None
-    # Set daemon to True
-    anomaly_thread.daemon = True
-    diagnostics_thread.daemon = True
-    train_monitor_thread.daemon = True
     
+    # Load generators if needed
+    if config['anomaly_classes'] != list(range(0, 19)):
+        anomaly_generators = get_anomaly_generators_dict(config['anomaly_classes'])
+    if config['diagnostics_classes'] != list(range(0, 15)):
+        diagnostics_generators = get_diagnostics_generators_dict(config['diagnostics_classes'])
 
+    # Create train monitor
+    train_monitor = TrainMonitor(argparse.Namespace(**config))
 
-    app = Flask(f'{VEHICLE_NAME}_backdoor')
-    @app.route('/start-attack', methods=['POST'])
+    # Create API using generic ContainerAPI subclass
+    api = ProducerAPI(container_name=VEHICLE_NAME, port=5000)
+    # Preload with merged, validated config
+    api.validate_config(config)
+    with api_lock:
+        api_config.update(config)
+    api.config.update(config)
+    api.configured = True
+    
+    # Create Flask app for backdoor (existing functionality)
+    backdoor_app = Flask(f'{VEHICLE_NAME}_backdoor')
+    
+    @backdoor_app.route('/start-attack', methods=['POST'])
     def start_attack():
         global UNDER_ATTACK, attack_thread
         
@@ -536,10 +795,9 @@ def main():
                 train_monitor.reset()
                 return 'Attack launched', 200
             else:
-                return 'Aleady under attack!!', 400
+                return 'Already under attack!!', 400
     
-
-    @app.route('/stop-attack', methods=['POST'])
+    @backdoor_app.route('/stop-attack', methods=['POST'])
     def stop_attack():
         global UNDER_ATTACK, attack_thread
         with attack_lock:
@@ -551,38 +809,42 @@ def main():
                 return 'Attack stopped', 200
             else:
                 return 'Wasn\'t under attack!!', 400
-    
 
-    flask_thread = threading.Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': args.bot_port})
-    flask_thread.daemon = True
-    flask_thread.start()
-    logger.info(f"Backdoor installed at {args.bot_port}")
+    # Start Flask threads
+    api_thread = threading.Thread(
+        target=api.run,
+        kwargs={}
+    )
+    api_thread.daemon = True
+    api_thread.start()
+    logger.info(f"Producer API started on port 5000")
+    
+    backdoor_thread = threading.Thread(
+        target=backdoor_app.run, 
+        kwargs={'host': '0.0.0.0', 'port': config['bot_port']}
+    )
+    backdoor_thread.daemon = True
+    backdoor_thread.start()
+    logger.info(f"Backdoor installed at {config['bot_port']}")
+    
+    # Suppress Flask logs
     flask_logger = logging.getLogger('werkzeug')
     flask_logger.name = f"[{VEHICLE_NAME}_BOT]"
     def custom_handle(record):
         return
     flask_logger.handle = custom_handle
 
-    # Start threads
-    logger.info(f"Starting threads...")
+    # Set up signal handlers
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame))
-    stop_threads = False
-    anomaly_thread.start()
-    diagnostics_thread.start()
-    if mode == 'OF': train_monitor_thread.start()
+    signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame))
     
-    while not stop_threads:
-        time.sleep(0.1)
-    logger.info(f"Stopping producing threads...")
-    anomaly_thread.join(1)
-    diagnostics_thread.join(1)
-    with attack_lock:
-        if UNDER_ATTACK:
-            attack.alive = False
-            attack_thread.join(1)
-    if mode == 'OF': train_monitor_thread.join(1)
-    logger.info(f"Stopped producing threads.")
-
+    # Main loop
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("Shutting down producer...")
+        stop_producer_threads()
 
 if __name__ == '__main__':
     main()
