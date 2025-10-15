@@ -8,10 +8,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates bash git \
     && rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip to the latest version
+RUN pip install --no-cache-dir --upgrade pip
+
+ARG CACHE_BUST=1
 
 # Set workdir and copy current project producer code
+RUN git clone https://github.com/DIETI-DISTA-IoT/Train_IoT_data_producer.git /app/producer
+RUN ls && git clone https://github.com/DIETI-DISTA-IoT/of-core app/OpenFAIR/
+
 WORKDIR /app
-COPY . /app
 
 # Ensure Python can import project-local modules
 ENV PYTHONPATH=/app
@@ -24,8 +30,6 @@ ENV VEHICLE_NAME="e700_4801"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 
-# Upgrade pip to the latest version
-RUN pip install --no-cache-dir --upgrade pip
 
 # Install the dependencies for our Flask producer
 RUN pip install --no-cache-dir -r producer/requirements.txt
