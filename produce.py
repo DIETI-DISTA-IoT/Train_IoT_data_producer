@@ -644,8 +644,9 @@ def stop_producer_threads():
         stop_threads = True
         
         for thread in api_threads:
+            logger.info(f"joining to thread: {thread}. Please wait...")
             thread.join(timeout=5)
-        
+            logger.info(f"Joined to thread!")
         api_threads = []
         api_running = False
         stop_threads = False  # Reset for next start
@@ -663,6 +664,7 @@ class ProducerAPI(ContainerAPI):
 
     def handle_start(self, data):
         global api_config
+        self.logger.info("Main start command received!")
         if not self.config:
             raise ValueError("Not configured")
         with api_lock:
@@ -670,20 +672,24 @@ class ProducerAPI(ContainerAPI):
         success, message = start_producer_threads(api_config)
         if not success:
             raise RuntimeError(message)
+        self.logger.info(f"{message}")
         return {"vehicle": api_config.get('vehicle_name'), "message": message}
 
     def handle_stop(self, data):
+        self.logger.info("Main stop command received!")
         success, message = stop_producer_threads()
         # Make idempotent: treat already-stopped as success
         if not success:
             normalized = str(message).lower()
             if "not running" in normalized or "already" in normalized:
+                self.logger.info(f"Already stopped! {message}")
                 return {"status": "already_stopped", "message": message}
             raise RuntimeError(message)
+        self.logger.info(f"{message}")
         return {"message": message}
 
     def get_detailed_status(self):
-        return {
+        main_status =  {
             "running": api_running,
             "vehicle": api_config.get('vehicle_name'),
             "records_produced": produced_records,
@@ -692,6 +698,8 @@ class ProducerAPI(ContainerAPI):
             "under_attack": UNDER_ATTACK,
             "config": api_config
         }
+        self.logger.info(f"Main status requested: {main_status}")
+        return main_status
 
 def main():
     global VEHICLE_NAME, MANAGER_PORT, UNDER_ATTACK, attack_lock
@@ -785,7 +793,7 @@ def main():
     @backdoor_app.route('/start-attack', methods=['POST'])
     def start_attack():
         global UNDER_ATTACK, attack_thread
-        
+        logger.info("Received start attack request!")
         with attack_lock:
             if not UNDER_ATTACK:
                 attack_thread = threading.Thread(target=attack.start_attack)
@@ -793,21 +801,26 @@ def main():
                 attack_thread.start()
                 UNDER_ATTACK = True
                 train_monitor.reset()
+                logger.info("Attack Launched!")
                 return 'Attack launched', 200
             else:
+                logger.info("Already under Attack!")
                 return 'Already under attack!!', 400
     
     @backdoor_app.route('/stop-attack', methods=['POST'])
     def stop_attack():
         global UNDER_ATTACK, attack_thread
+        logger.info("Received stop attack request!")
         with attack_lock:
             if UNDER_ATTACK:
                 attack.alive = False
                 attack_thread.join(1)
                 UNDER_ATTACK = False
                 train_monitor.reset()
+                logger.info("Attack stopped!")
                 return 'Attack stopped', 200
             else:
+                logger.info("Did nothing! Wasn\'t under attack!!")
                 return 'Wasn\'t under attack!!', 400
 
     # Start Flask threads
