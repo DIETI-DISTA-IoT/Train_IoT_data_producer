@@ -19,6 +19,7 @@ from flask import Flask, request, jsonify
 import socket
 import yaml
 from OpenFAIR.container_api import ContainerAPI
+from train_simulator import Train, EventType
 BASE_DIR = os.path.dirname(__file__)
 
 
