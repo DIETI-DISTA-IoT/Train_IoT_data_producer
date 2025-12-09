@@ -16,11 +16,11 @@ ARG CACHE_BUST=1
 WORKDIR /app
 
 # Set workdir and copy current project producer code
-RUN git clone https://github.com/DIETI-DISTA-IoT/Train_IoT_data_producer.git .
+RUN git clone --branch sereBench https://github.com/DIETI-DISTA-IoT/Train_IoT_data_producer.git .
 # Install the dependencies for our Flask producer
 RUN pip install --no-cache-dir -r requirements.txt
 # Also add the OpenFAIR package 
-RUN git clone https://github.com/DIETI-DISTA-IoT/of-core OpenFAIR/
+RUN git clone --branch sereBench https://github.com/DIETI-DISTA-IoT/of-core OpenFAIR/
 
 
 # Set environment variables for Kafka connection
