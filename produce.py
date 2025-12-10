@@ -132,6 +132,7 @@ with open(os.path.join(BASE_DIR, 'copula_normali.pkl'), 'rb') as f:
     copula_normali = pickle.load(f)
 
 produced_records = 0
+produced_attacks = 0
 produced_anomalies = 0
 produced_diagnostics = 0
 stop_threads = False
@@ -197,7 +198,7 @@ def produce_message(data, topic_name):
         if produced_records % 50 == 0:
             producer.flush()
         if produced_records % 100 == 0:
-            logger.info(f"sent {produced_records} records for now. {produced_anomalies} anomalies and {produced_diagnostics} diagnostics.")
+            logger.info(f"sent {produced_records} records for now. {produced_attacks} attacks, {produced_anomalies} anomalies, and {produced_diagnostics} diagnostics.")
     except Exception as e:
         print(f"Error while producing message to {topic_name} : {e}")
 
@@ -243,7 +244,7 @@ def convert_dict_to_json_serializable(d):
 
 
 def thread_anomalie(args):
-    global produced_anomalies, attack_lock, virtual_train
+    global produced_anomalies, attack_lock, virtual_train, produced_attacks
     logger.info(f"Starting thread for anomalies generation for vehicle: {VEHICLE_NAME}")
     media_durata_anomalie = args.mu_anomalies * args.alpha
     sigma_anomalie = 1 * args.beta
@@ -259,16 +260,15 @@ def thread_anomalie(args):
     
     event = EventType.ANOMALY
 
-   
-        
-
     while not stop_threads:
 
         with attack_lock:
             # health_dict = train_monitor.probe_health()
             if get_status_robust() == 'INFECTED':
                 event = EventType.ATTACK
-
+                produced_attacks += 1
+            else:
+                produced_anomalies += 1
             # data_to_send.update(health_dict)
             # data_to_send['node_status'] = attack_label
             # produce_message(data=health_dict, topic_name=f"{VEHICLE_NAME}_HEALTH")
@@ -303,9 +303,8 @@ def thread_anomalie(args):
         data_to_send = convert_dict_to_json_serializable(synthetic_anomaly)
         data_to_send['Timestamp'] = str(data_to_send['Timestamp'])
         data_to_send['Timestamp chiusura'] = str(data_to_send['Timestamp chiusura'])
+               
         
-        
-        produced_anomalies += 1
         produce_message(data_to_send, topic_name)
         if args.time_emulation:
             time.sleep(durata_anomalia[0])
