@@ -225,51 +225,64 @@ def health_probes_thread(args):
 
 
 def thread_anomalie(args):
-    global produced_anomalies, attack_lock
+    global produced_anomalies, attack_lock, virtual_train
     logger.info(f"Starting thread for anomalies generation for vehicle: {VEHICLE_NAME}")
     media_durata_anomalie = args.mu_anomalies * args.alpha
     sigma_anomalie = 1 * args.beta
     lognormal_anomalie = lognorm(s=sigma_anomalie, scale=np.exp(np.log(media_durata_anomalie)))
     topic_name = f"{VEHICLE_NAME}_anomalies"
 
+    """
     if args.anomaly_classes == list(range(0,19)):
         sample_anomaly_function = sample_anomaly_from_global
     else:
         sample_anomaly_function = sample_anomaly_from_clusters
+    """
+    
+    if args.mode == 'SW':
+        with attack_lock:
+            health_dict = train_monitor.probe_health()
+            attack_label = get_status_robust()
+            data_to_send.update(health_dict)
+            data_to_send['node_status'] = attack_label
+        produce_message(data=health_dict, topic_name=f"{VEHICLE_NAME}_HEALTH")
+        
 
     while not stop_threads:
-        cluster, synthetic_anomalie = sample_anomaly_function()
+
+        if np.random.random() > 0.5:
+            event = EventType.ANOMALY
+        else:
+            event = EventType.ATTACK
+
+        synthetic_anomaly = virtual_train.step(event, args.adversarial_degree)
+
+        # cluster, synthetic_anomaly = sample_anomaly_function()
         durata_anomalia = lognormal_anomalie.rvs(size=1)
-        synthetic_anomalie['Durata'] = durata_anomalia
-        synthetic_anomalie['Flotta'] = 'ETR700'
-        synthetic_anomalie['Veicolo'] = VEHICLE_NAME
-        synthetic_anomalie['Test'] = 'N'
-        synthetic_anomalie['Timestamp'] = pd.Timestamp.now()
-        synthetic_anomalie['Timestamp chiusura'] = synthetic_anomalie['Timestamp'] + pd.to_timedelta(synthetic_anomalie['Durata'], unit='s')
-        synthetic_anomalie['Posizione'] = np.nan
-        synthetic_anomalie['Sistema'] = 'VEHICLE'
-        synthetic_anomalie['Componente'] = 'VEHICLE'
-        synthetic_anomalie['Timestamp segnale'] = np.nan
+        synthetic_anomaly['Durata'] = durata_anomalia
+        synthetic_anomaly['Flotta'] = 'ETR700'
+        synthetic_anomaly['Veicolo'] = VEHICLE_NAME
+        synthetic_anomaly['Test'] = 'N'
+        synthetic_anomaly['Timestamp'] = pd.Timestamp.now()
+        synthetic_anomaly['Timestamp chiusura'] = synthetic_anomaly['Timestamp'] + pd.to_timedelta(synthetic_anomaly['Durata'], unit='s')
+        synthetic_anomaly['Posizione'] = np.nan
+        synthetic_anomaly['Sistema'] = 'VEHICLE'
+        synthetic_anomaly['Componente'] = 'VEHICLE'
+        synthetic_anomaly['Timestamp segnale'] = np.nan
 
         for col in all_columns:
-            if col not in synthetic_anomalie.columns:
-                synthetic_anomalie[col] = np.nan
+            if col not in synthetic_anomaly.columns:
+                synthetic_anomaly[col] = np.nan
 
-        synthetic_anomalie = synthetic_anomalie.round(2)
-        synthetic_anomalie = synthetic_anomalie[all_columns]
+        synthetic_anomaly = synthetic_anomaly.round(2)
+        synthetic_anomaly = synthetic_anomaly[all_columns]
         
-        data_to_send = synthetic_anomalie.iloc[0].to_dict()
+        data_to_send = synthetic_anomaly.iloc[0].to_dict()
         data_to_send['Timestamp'] = str(data_to_send['Timestamp'])
         data_to_send['Timestamp chiusura'] = str(data_to_send['Timestamp chiusura'])
-        data_to_send['cluster'] = str(cluster)
+        
 
-        if mode == 'SW':
-            with attack_lock:
-                health_dict = train_monitor.probe_health()
-                attack_label = get_status_robust()
-                data_to_send.update(health_dict)
-                data_to_send['node_status'] = attack_label
-            produce_message(data=health_dict, topic_name=f"{VEHICLE_NAME}_HEALTH")
+
         
         produced_anomalies += 1
         produce_message(data_to_send, topic_name)
@@ -449,38 +462,7 @@ def load_config_from_environment():
     config = {
         'vehicle_name': os.getenv('VEHICLE_NAME'),
         'kafka_broker': os.getenv('KAFKA_BROKER', 'kafka:9092'),
-        'logging_level': os.getenv('LOGGING_LEVEL', 'INFO'),
-        'manager_port': int(os.getenv('MANAGER_PORT', '5000')),
-        'mode': os.getenv('MODE', 'OF'),
-        
-        # Network configuration
-        'target_ip': os.getenv('TARGET_IP', '172.18.0.4'),
-        'target_port': int(os.getenv('TARGET_PORT', '80')),
-        'bot_port': int(os.getenv('BOT_PORT', '5002')),
-        
-        # Timing parameters
-        'probe_frequency_seconds': float(os.getenv('PROBE_FREQUENCY_SECONDS', '2')),
-        'ping_thread_timeout': float(os.getenv('PING_THREAD_TIMEOUT', '5')),
-        'ping_host': os.getenv('PING_HOST', 'www.google.com'),
-        
-        # Attack parameters
-        'duration': int(os.getenv('DURATION', '0')),
-        'packet_size': int(os.getenv('PACKET_SIZE', '1024')),
-        'delay': float(os.getenv('DELAY', '0.001')),
-        
-        # Data generation parameters
-        'mu_anomalies': float(os.getenv('MU_ANOMALIES', '157')),
-        'mu_normal': float(os.getenv('MU_NORMAL', '115')),
-        'alpha': float(os.getenv('ALPHA', '0.2')),
-        'beta': float(os.getenv('BETA', '1.9')),
-        'time_emulation': os.getenv('TIME_EMULATION', 'false').lower() == 'true',
-        
-        # Probe metrics
-        'probe_metrics': os.getenv('PROBE_METRICS', 'RTT,INBOUND,OUTBOUND,CPU,MEM').split(','),
-        
-        # Default anomaly and diagnostics classes
-        'anomaly_classes': list(range(0, 19)),
-        'diagnostics_classes': list(range(0, 15))
+        'logging_level': os.getenv('LOGGING_LEVEL', 'INFO')
     }
     
     # Validate required environment variables
@@ -489,76 +471,7 @@ def load_config_from_environment():
     
     return config
 
-def load_config_from_file(config_path='/app/config.yaml'):
-    """Load configuration from YAML file"""
-    try:
-        with open(config_path, 'r') as f:
-            file_config = yaml.safe_load(f)
-        
-        # Convert file config to our format
-        config = {}
-        
-        if 'vehicle' in file_config:
-            config['vehicle_name'] = file_config['vehicle'].get('name')
-        
-        if 'data_generation' in file_config:
-            dg = file_config['data_generation']
-            config.update({
-                'mu_anomalies': dg.get('mu_anomalies', 157),
-                'mu_normal': dg.get('mu_normal', 115),
-                'alpha': dg.get('alpha', 0.2),
-                'beta': dg.get('beta', 1.9),
-                'time_emulation': dg.get('time_emulation', False),
-                'anomaly_classes': dg.get('anomaly_classes', list(range(0, 19))),
-                'diagnostics_classes': dg.get('diagnostics_classes', list(range(0, 15)))
-            })
-        
-        if 'probe' in file_config:
-            probe = file_config['probe']
-            config.update({
-                'probe_frequency_seconds': probe.get('frequency_seconds', 2),
-                'ping_thread_timeout': probe.get('timeout', 5),
-                'ping_host': probe.get('host', 'www.google.com'),
-                'probe_metrics': probe.get('metrics', ['RTT', 'INBOUND', 'OUTBOUND', 'CPU', 'MEM'])
-            })
-        
-        if 'attack' in file_config:
-            attack = file_config['attack']
-            config.update({
-                'target_ip': attack.get('target_ip', '172.18.0.4'),
-                'target_port': attack.get('target_port', 80),
-                'duration': attack.get('duration', 0),
-                'packet_size': attack.get('packet_size', 1024),
-                'delay': attack.get('delay', 0.001),
-                'bot_port': attack.get('bot_port', 5002)
-            })
-        
-        if 'system' in file_config:
-            system = file_config['system']
-            config.update({
-                'mode': system.get('mode', 'OF'),
-                'logging_level': system.get('logging_level', 'INFO'),
-                'manager_port': system.get('manager_port', 5000)
-            })
-        
-        return config
-    except FileNotFoundError:
-        print(f"Config file {config_path} not found, using environment variables only")
-        return {}
-    except yaml.YAMLError as e:
-        print(f"Error parsing config file: {e}")
-        return {}
 
-def merge_configs(env_config, file_config):
-    """Merge environment and file configurations, with environment taking precedence"""
-    merged = env_config.copy()
-    
-    # Override with file config values (if not set in environment)
-    for key, value in file_config.items():
-        if key not in merged or merged[key] is None:
-            merged[key] = value
-    
-    return merged
 
 def validate_config(config):
     """Validate configuration parameters"""
@@ -568,60 +481,30 @@ def validate_config(config):
         if not config.get(field):
             raise ValueError(f"Missing required configuration field: {field}")
     
-    # Validate numeric ranges
-    if not (0 < config.get('mu_anomalies', 0) < 1000):
-        raise ValueError("mu_anomalies must be between 0 and 1000")
-    
-    if not (0 < config.get('mu_normal', 0) < 1000):
-        raise ValueError("mu_normal must be between 0 and 1000")
-    
-    if not (0 < config.get('alpha', 0) < 10):
-        raise ValueError("alpha must be between 0 and 10")
-    
-    if not (0 < config.get('beta', 0) < 10):
-        raise ValueError("beta must be between 0 and 10")
-    
-    # Validate port numbers
-    if not (1 <= config.get('target_port', 0) <= 65535):
-        raise ValueError("target_port must be between 1 and 65535")
-    
-    if not (1 <= config.get('bot_port', 0) <= 65535):
-        raise ValueError("bot_port must be between 1 and 65535")
-    
     return True
 
 def start_producer_threads(config):
     """Start producer threads with configuration"""
-    global api_threads, api_running, anomaly_generators, diagnostics_generators
+    global api_threads, api_running, anomaly_generators, diagnostics_generators, virtual_train
     
     with api_lock:
         if api_running:
             return False, "Producer is already running"
+
+
+        virtual_train = Train()
         
-        # Create thread arguments from config
-        thread_args = argparse.Namespace(
-            mu_anomalies=config['mu_anomalies'],
-            mu_normal=config['mu_normal'],
-            alpha=config['alpha'],
-            beta=config['beta'],
-            anomaly_classes=config['anomaly_classes'],
-            diagnostics_classes=config['diagnostics_classes'],
-            time_emulation=config['time_emulation'],
-            probe_frequency_seconds=config['probe_frequency_seconds'],
-            ping_thread_timeout=config['ping_thread_timeout'],
-            ping_host=config['ping_host'],
-            probe_metrics=config['probe_metrics']
-        )
-        
+        """
         # Ensure generators are loaded based on current config
         if thread_args.anomaly_classes != list(range(0, 19)):
             anomaly_generators = get_anomaly_generators_dict(thread_args.anomaly_classes)
         if thread_args.diagnostics_classes != list(range(0, 15)):
             diagnostics_generators = get_diagnostics_generators_dict(thread_args.diagnostics_classes)
-
+        """
+        
         # Start threads
-        anomaly_thread = threading.Thread(target=thread_anomalie, args=(thread_args,))
-        diagnostics_thread = threading.Thread(target=thread_normali, args=(thread_args,))
+        anomaly_thread = threading.Thread(target=thread_anomalie, args=(argparse.Namespace(**config),))
+        diagnostics_thread = threading.Thread(target=thread_normali, args=(argparse.Namespace(**config),))
         
         anomaly_thread.daemon = True
         diagnostics_thread.daemon = True
@@ -705,17 +588,11 @@ class ProducerAPI(ContainerAPI):
 def main():
     global VEHICLE_NAME, MANAGER_PORT, UNDER_ATTACK, attack_lock
     global producer, logger, anomaly_generators, diagnostics_generators
-    global anomaly_thread, diagnostics_thread, stop_threads, train_monitor, mode
+    global anomaly_thread, diagnostics_thread, stop_threads, train_monitor
     global api_config
 
     # Load configuration from environment variables
-    env_config = load_config_from_environment()
-    
-    # Load configuration from file
-    file_config = load_config_from_file()
-    
-    # Merge configurations
-    config = merge_configs(env_config, file_config)
+    config = load_config_from_environment()
     
     # Validate configuration
     try:
@@ -726,9 +603,8 @@ def main():
     
     # Set global variables from config
     VEHICLE_NAME = config['vehicle_name']
-    MANAGER_PORT = config['manager_port']
+
     UNDER_ATTACK = False
-    mode = config['mode']
     
     # Store config for API
     api_config = config.copy()
@@ -742,9 +618,7 @@ def main():
     
     # Log configuration summary
     logger.info(f"Starting producer for vehicle: {VEHICLE_NAME}")
-    logger.info(f"Mode: {mode}")
     logger.info(f"Kafka broker: {config['kafka_broker']}")
-    logger.info(f"Manager port: {config['manager_port']}")
     
     # Configure no proxy if needed
     if os.getenv('no_proxy_host'):
@@ -760,6 +634,8 @@ def main():
 
     # Create attack object
     attack_lock = threading.Lock()
+    
+    """
     attack = Attack(
         target_ip=config['target_ip'],
         target_port=config['target_port'],
@@ -767,17 +643,21 @@ def main():
         packet_size=config['packet_size'],
         delay=config['delay']
     )
+    """
 
     logger.info(f"Setting up producing threads for vehicle: {VEHICLE_NAME}")
     
+    """
     # Load generators if needed
     if config['anomaly_classes'] != list(range(0, 19)):
         anomaly_generators = get_anomaly_generators_dict(config['anomaly_classes'])
     if config['diagnostics_classes'] != list(range(0, 15)):
         diagnostics_generators = get_diagnostics_generators_dict(config['diagnostics_classes'])
+    
 
     # Create train monitor
     train_monitor = TrainMonitor(argparse.Namespace(**config))
+    """
 
     # Create API using generic ContainerAPI subclass
     api = ProducerAPI(container_name=VEHICLE_NAME, port=5000)
