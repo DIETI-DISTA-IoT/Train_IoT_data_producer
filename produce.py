@@ -462,7 +462,8 @@ def load_config_from_environment():
     config = {
         'vehicle_name': os.getenv('VEHICLE_NAME'),
         'kafka_broker': os.getenv('KAFKA_BROKER', 'kafka:9092'),
-        'logging_level': os.getenv('LOGGING_LEVEL', 'INFO')
+        'logging_level': os.getenv('LOGGING_LEVEL', 'INFO'),
+        'bot_port': os.getenv('BOT_PORT', '5002')
     }
     
     # Validate required environment variables
