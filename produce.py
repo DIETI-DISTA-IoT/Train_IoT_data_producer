@@ -148,7 +148,7 @@ diagnostics_probabilities = pd.read_csv(os.path.join(BASE_DIR, 'generators', 'di
 columns_to_generate = [
     'Durata', 'CabEnabled_M1', 'CabEnabled_M8', 'ERTMS_PiastraSts', 'HMI_ACPntSts_T2', 'HMI_ACPntSts_T7',
     'HMI_DCPntSts_T2', 'HMI_DCPntSts_T7', 'HMI_Iline', 'HMI_Irsts_T2', 'HMI_Irsts_T7', 'HMI_VBatt_T2',
-    'HMI_VBatt_T4', 'HMI_VBatt_T5', 'HMI_VBatt_T7', 'HMI_Vline', 'HMI_impSIL', 'LineVoltType', 'MDS_LedLimVel',
+    'HMI_VBatt_T4', 'HMI_VBatt_T5', 'HMI_VBatt_T7', 'HMI_Vline', 'HMI_impSIL', 'LineVoltType',
     'MDS_StatoMarcia', '_GPS_LAT', '_GPS_LON', 'ldvvelimps', 'ldvveltreno', 'usB1BCilPres_M1', 'usB1BCilPres_M3',
     'usB1BCilPres_M6', 'usB1BCilPres_M8', 'usB1BCilPres_T2', 'usB1BCilPres_T4', 'usB1BCilPres_T5', 'usB1BCilPres_T7',
     'usB2BCilPres_M1', 'usB2BCilPres_M3', 'usB2BCilPres_M6', 'usB2BCilPres_M8', 'usB2BCilPres_T2', 'usB2BCilPres_T4',
@@ -156,9 +156,9 @@ columns_to_generate = [
 ]
 
 all_columns = [
-    'Flotta', 'Veicolo', 'Codice', 'Nome', 'Descrizione', 'Test', 'Timestamp', 'Timestamp chiusura', 'Durata', 
-    'Posizione', 'Sistema', 'Componente', 'Latitudine', 'Longitudine', 'Contemporaneo', 'Timestamp segnale'
-] + columns_to_generate + ['Tipo_Evento', 'Tipo_Evento_Classificato']
+    'Flotta', 'Veicolo', 'Codice', 'Nome', 'Descrizione', 'Timestamp', 'Timestamp chiusura', 'Durata', 
+    'Posizione', 'Sistema', 'Componente', 'Timestamp segnale'
+] + columns_to_generate
 
 
 def parse_str_list(arg):
@@ -224,6 +224,24 @@ def health_probes_thread(args):
         time.sleep(args.probe_frequency_seconds)
 
 
+def round_dict_numbers(d, n):
+    """Round all numeric values in a dictionary to n decimal places."""
+    return {
+        key: round(value, n) if isinstance(value, (int, float)) else value
+        for key, value in d.items()
+    }
+
+
+def convert_dict_to_json_serializable(d):
+    """Convert numpy types to native Python types."""
+    return {
+        key: int(value) if isinstance(value, np.integer) else 
+             float(value) if isinstance(value, np.floating) else 
+             value
+        for key, value in d.items()
+    }
+
+
 def thread_anomalie(args):
     global produced_anomalies, attack_lock, virtual_train
     logger.info(f"Starting thread for anomalies generation for vehicle: {VEHICLE_NAME}")
@@ -239,50 +257,50 @@ def thread_anomalie(args):
         sample_anomaly_function = sample_anomaly_from_clusters
     """
     
-    if args.mode == 'SW':
-        with attack_lock:
-            health_dict = train_monitor.probe_health()
-            attack_label = get_status_robust()
-            data_to_send.update(health_dict)
-            data_to_send['node_status'] = attack_label
-        produce_message(data=health_dict, topic_name=f"{VEHICLE_NAME}_HEALTH")
+    event = EventType.ANOMALY
+
+    with attack_lock:
+        # health_dict = train_monitor.probe_health()
+        if get_status_robust() == 'INFECTED':
+            event = EventType.ATTACK
+
+        # data_to_send.update(health_dict)
+        # data_to_send['node_status'] = attack_label
+    # produce_message(data=health_dict, topic_name=f"{VEHICLE_NAME}_HEALTH")
         
 
     while not stop_threads:
-
-        if np.random.random() > 0.5:
-            event = EventType.ANOMALY
-        else:
-            event = EventType.ATTACK
 
         synthetic_anomaly = virtual_train.step(event, args.adversarial_degree)
 
         # cluster, synthetic_anomaly = sample_anomaly_function()
         durata_anomalia = lognormal_anomalie.rvs(size=1)
-        synthetic_anomaly['Durata'] = durata_anomalia
+        synthetic_anomaly['Durata'] = durata_anomalia[0]
         synthetic_anomaly['Flotta'] = 'ETR700'
         synthetic_anomaly['Veicolo'] = VEHICLE_NAME
-        synthetic_anomaly['Test'] = 'N'
+        # synthetic_anomaly['Test'] = 'N'
         synthetic_anomaly['Timestamp'] = pd.Timestamp.now()
-        synthetic_anomaly['Timestamp chiusura'] = synthetic_anomaly['Timestamp'] + pd.to_timedelta(synthetic_anomaly['Durata'], unit='s')
-        synthetic_anomaly['Posizione'] = np.nan
-        synthetic_anomaly['Sistema'] = 'VEHICLE'
-        synthetic_anomaly['Componente'] = 'VEHICLE'
-        synthetic_anomaly['Timestamp segnale'] = np.nan
+        synthetic_anomaly['Timestamp chiusura'] = pd.to_datetime(synthetic_anomaly['Timestamp'] + pd.to_timedelta(synthetic_anomaly['Durata'], unit='s'))
+        # synthetic_anomaly['Posizione'] = np.nan
+        # synthetic_anomaly['Sistema'] = 'VEHICLE'
+        # synthetic_anomaly['Componente'] = 'VEHICLE'
+        # synthetic_anomaly['Timestamp segnale'] = np.nan
 
+        """
         for col in all_columns:
-            if col not in synthetic_anomaly.columns:
+            if col not in synthetic_anomaly.keys():
                 synthetic_anomaly[col] = np.nan
+        """
+                
+        synthetic_anomaly = round_dict_numbers(synthetic_anomaly,4)
 
-        synthetic_anomaly = synthetic_anomaly.round(2)
-        synthetic_anomaly = synthetic_anomaly[all_columns]
-        
-        data_to_send = synthetic_anomaly.iloc[0].to_dict()
+        # synthetic_anomaly = synthetic_anomaly[all_columns]
+        # data_to_send = synthetic_anomaly.iloc[0].to_dict()
+
+        data_to_send = convert_dict_to_json_serializable(synthetic_anomaly)
         data_to_send['Timestamp'] = str(data_to_send['Timestamp'])
         data_to_send['Timestamp chiusura'] = str(data_to_send['Timestamp chiusura'])
         
-
-
         
         produced_anomalies += 1
         produce_message(data_to_send, topic_name)
@@ -303,53 +321,50 @@ def sample_normal_from_clusters():
 
 
 def thread_normali(args):
-    global produced_diagnostics, attack_lock
+    global produced_diagnostics, virtual_train
     logger.info(f"Starting thread for normal data generation for vehicle: {VEHICLE_NAME}")
     media_durata_normali = args.mu_normal * args.alpha
     sigma_normali = 1 * args.beta
     lognormal_normali = lognorm(s=sigma_normali, scale=np.exp(np.log(media_durata_normali)))
     topic_name = f"{VEHICLE_NAME}_normal_data"
 
+    """
     if args.diagnostics_classes == list(range(0,15)):
         sample_normal_function = sample_normal_from_global
     else:
         sample_normal_function = sample_normal_from_clusters
+    """
+
 
     while not stop_threads:
-        cluster, synthetic_normali = sample_normal_function()
+        synthetic_normal = virtual_train.step(EventType.NORMAL)
         durata_normale = lognormal_normali.rvs(size=1)
-        synthetic_normali['Durata'] = durata_normale
-        synthetic_normali['Flotta'] = 'ETR700'
-        synthetic_normali['Veicolo'] = VEHICLE_NAME
-        synthetic_normali['Test'] = 'N'
-        synthetic_normali['Timestamp'] = pd.Timestamp.now()
-        synthetic_normali['Timestamp chiusura'] = synthetic_normali['Timestamp'] + pd.to_timedelta(synthetic_normali['Durata'], unit='s')
-        synthetic_normali['Posizione'] = np.nan
-        synthetic_normali['Sistema'] = 'VEHICLE'
-        synthetic_normali['Componente'] = 'VEHICLE'
-        synthetic_normali['Timestamp segnale'] = np.nan
+        synthetic_normal['Durata'] = durata_normale[0]
+        synthetic_normal['Flotta'] = 'ETR700'
+        synthetic_normal['Veicolo'] = VEHICLE_NAME
+        synthetic_normal['Test'] = 'N'
+        synthetic_normal['Timestamp'] = pd.Timestamp.now()
+        synthetic_normal['Timestamp chiusura'] = synthetic_normal['Timestamp'] + pd.to_timedelta(synthetic_normal['Durata'], unit='s')
+        synthetic_normal['Posizione'] = np.nan
+        synthetic_normal['Sistema'] = 'VEHICLE'
+        synthetic_normal['Componente'] = 'VEHICLE'
+        synthetic_normal['Timestamp segnale'] = np.nan
 
         for col in all_columns:
-            if col not in synthetic_normali.columns:
-                synthetic_normali[col] = np.nan
+            if col not in synthetic_normal.keys():
+                synthetic_normal[col] = np.nan
 
-        synthetic_normali = synthetic_normali.round(2)
-        synthetic_normali = synthetic_normali[all_columns]
+        synthetic_normal = round_dict_numbers(synthetic_normal, 4)
+        # synthetic_normal = synthetic_normal[all_columns]
         # print(f"Nuova diagnostica generata: {synthetic_normali}")
         # Convert data to JSON and send it to Kafka
-        data_to_send = synthetic_normali.iloc[0].to_dict()
+        #data_to_send = synthetic_normal.iloc[0].to_dict()
+        
+        data_to_send = convert_dict_to_json_serializable(synthetic_normal)
         data_to_send['Timestamp'] = str(data_to_send['Timestamp'])
         data_to_send['Timestamp chiusura'] = str(data_to_send['Timestamp chiusura'])
-        data_to_send['cluster'] = str(cluster)
+        # data_to_send['cluster'] = str(cluster)
         
-        if mode == 'SW':
-            with attack_lock:
-                health_dict = train_monitor.probe_health()
-                attack_label = get_status_robust()
-                data_to_send.update(health_dict)
-                data_to_send['node_status'] = attack_label
-            produce_message(data=health_dict, topic_name=f"{VEHICLE_NAME}_HEALTH")
-
         produce_message(data_to_send, topic_name)
         produced_diagnostics += 1
         if args.time_emulation:
@@ -678,11 +693,13 @@ def main():
         logger.info("Received start attack request!")
         with attack_lock:
             if not UNDER_ATTACK:
+                """
                 attack_thread = threading.Thread(target=attack.start_attack)
                 attack_thread.daemon = True
                 attack_thread.start()
+                """
                 UNDER_ATTACK = True
-                train_monitor.reset()
+                # train_monitor.reset()
                 logger.info("Attack Launched!")
                 return 'Attack launched', 200
             else:
@@ -695,10 +712,10 @@ def main():
         logger.info("Received stop attack request!")
         with attack_lock:
             if UNDER_ATTACK:
-                attack.alive = False
-                attack_thread.join(1)
+                # attack.alive = False
+                # attack_thread.join(1)
                 UNDER_ATTACK = False
-                train_monitor.reset()
+                # train_monitor.reset()
                 logger.info("Attack stopped!")
                 return 'Attack stopped', 200
             else:
