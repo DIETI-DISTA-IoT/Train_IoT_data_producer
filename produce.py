@@ -259,17 +259,20 @@ def thread_anomalie(args):
     
     event = EventType.ANOMALY
 
-    with attack_lock:
-        # health_dict = train_monitor.probe_health()
-        if get_status_robust() == 'INFECTED':
-            event = EventType.ATTACK
-
-        # data_to_send.update(health_dict)
-        # data_to_send['node_status'] = attack_label
-    # produce_message(data=health_dict, topic_name=f"{VEHICLE_NAME}_HEALTH")
+   
         
 
     while not stop_threads:
+
+        with attack_lock:
+            # health_dict = train_monitor.probe_health()
+            if get_status_robust() == 'INFECTED':
+                event = EventType.ATTACK
+
+            # data_to_send.update(health_dict)
+            # data_to_send['node_status'] = attack_label
+            # produce_message(data=health_dict, topic_name=f"{VEHICLE_NAME}_HEALTH")
+
 
         synthetic_anomaly = virtual_train.step(event, args.adversarial_degree)
 
