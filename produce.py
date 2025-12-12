@@ -244,12 +244,13 @@ def convert_dict_to_json_serializable(d):
 
 
 def thread_anomalie(args):
-    global produced_anomalies, attack_lock, virtual_train, produced_attacks
+    global produced_anomalies, attack_lock, virtual_train, eval_virtual_train, produced_attacks
     logger.info(f"Starting thread for anomalies generation for vehicle: {VEHICLE_NAME}")
     media_durata_anomalie = args.mu_anomalies * args.alpha
     sigma_anomalie = 1 * args.beta
     lognormal_anomalie = lognorm(s=sigma_anomalie, scale=np.exp(np.log(media_durata_anomalie)))
     topic_name = f"{VEHICLE_NAME}_anomalies"
+    eval_topic_name = f"{VEHICLE_NAME}_eval_anomalies"
 
     """
     if args.anomaly_classes == list(range(0,19)):
@@ -274,16 +275,22 @@ def thread_anomalie(args):
             # produce_message(data=health_dict, topic_name=f"{VEHICLE_NAME}_HEALTH")
 
 
-        synthetic_anomaly = virtual_train.step(event, args.adversarial_degree)
+        synthetic_anomaly = virtual_train.step(event)
+        eval_synth_anomaly = eval_virtual_train.step(event, args.adversarial_degree)
 
         # cluster, synthetic_anomaly = sample_anomaly_function()
         durata_anomalia = lognormal_anomalie.rvs(size=1)
         synthetic_anomaly['Durata'] = durata_anomalia[0]
+        eval_synth_anomaly['Durata'] = durata_anomalia[0]
         synthetic_anomaly['Flotta'] = 'ETR700'
+        eval_synth_anomaly['Flotta'] = 'ETR700'
         synthetic_anomaly['Veicolo'] = VEHICLE_NAME
+        eval_synth_anomaly['Veicolo'] = VEHICLE_NAME
         # synthetic_anomaly['Test'] = 'N'
         synthetic_anomaly['Timestamp'] = pd.Timestamp.now()
+        eval_synth_anomaly['Timestamp'] = synthetic_anomaly['Timestamp']
         synthetic_anomaly['Timestamp chiusura'] = pd.to_datetime(synthetic_anomaly['Timestamp'] + pd.to_timedelta(synthetic_anomaly['Durata'], unit='s'))
+        eval_synth_anomaly['Timestamp chiusura'] = synthetic_anomaly['Timestamp chiusura']
         # synthetic_anomaly['Posizione'] = np.nan
         # synthetic_anomaly['Sistema'] = 'VEHICLE'
         # synthetic_anomaly['Componente'] = 'VEHICLE'
@@ -296,6 +303,7 @@ def thread_anomalie(args):
         """
                 
         synthetic_anomaly = round_dict_numbers(synthetic_anomaly,4)
+        eval_synth_anomaly = round_dict_numbers(eval_synth_anomaly,4)
 
         # synthetic_anomaly = synthetic_anomaly[all_columns]
         # data_to_send = synthetic_anomaly.iloc[0].to_dict()
@@ -303,9 +311,13 @@ def thread_anomalie(args):
         data_to_send = convert_dict_to_json_serializable(synthetic_anomaly)
         data_to_send['Timestamp'] = str(data_to_send['Timestamp'])
         data_to_send['Timestamp chiusura'] = str(data_to_send['Timestamp chiusura'])
-               
-        
+
+        eval_data_to_send = convert_dict_to_json_serializable(eval_synth_anomaly)
+        eval_data_to_send['Timestamp'] = str(eval_data_to_send['Timestamp'])
+        eval_data_to_send['Timestamp chiusura'] = str(eval_data_to_send['Timestamp chiusura'])
+
         produce_message(data_to_send, topic_name)
+        produce_message(eval_data_to_send, eval_topic_name)
         if args.time_emulation:
             time.sleep(durata_anomalia[0])
 
@@ -340,6 +352,8 @@ def thread_normali(args):
 
     while not stop_threads:
         synthetic_normal = virtual_train.step(EventType.NORMAL)
+        _ = eval_virtual_train.step(EventType.NORMAL, args.adversarial_degree)
+        
         durata_normale = lognormal_normali.rvs(size=1)
         synthetic_normal['Durata'] = durata_normale[0]
         synthetic_normal['Flotta'] = 'ETR700'
@@ -503,7 +517,7 @@ def validate_config(config):
 
 def start_producer_threads(config):
     """Start producer threads with configuration"""
-    global api_threads, api_running, anomaly_generators, diagnostics_generators, virtual_train
+    global api_threads, api_running, anomaly_generators, diagnostics_generators, virtual_train, eval_virtual_train
     
     with api_lock:
         if api_running:
@@ -511,6 +525,7 @@ def start_producer_threads(config):
 
 
         virtual_train = Train()
+        eval_virtual_train = Train()
         
         """
         # Ensure generators are loaded based on current config
