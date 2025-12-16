@@ -259,7 +259,7 @@ def thread_anomalie(args):
         sample_anomaly_function = sample_anomaly_from_clusters
     """
     
-    event = EventType.ANOMALY
+    
 
     while not stop_threads:
 
@@ -269,6 +269,7 @@ def thread_anomalie(args):
                 event = EventType.ATTACK
                 produced_attacks += 1
             else:
+                event = EventType.ANOMALY
                 produced_anomalies += 1
             # data_to_send.update(health_dict)
             # data_to_send['node_status'] = attack_label
