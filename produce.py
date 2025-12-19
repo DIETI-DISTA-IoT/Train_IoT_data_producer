@@ -275,7 +275,7 @@ def thread_anomalie(args):
 
 
         synthetic_anomaly = virtual_train.step(event)
-        eval_synth_anomaly = eval_virtual_train.step(event, args.adversarial_degree)
+        eval_synth_anomaly = eval_virtual_train.step(event, adversarial=True)
 
         # cluster, synthetic_anomaly = sample_anomaly_function()
         durata_anomalia = lognormal_anomalie.rvs(size=1)
@@ -351,7 +351,7 @@ def thread_normali(args):
 
     while not stop_threads:
         synthetic_normal = virtual_train.step(EventType.NORMAL)
-        _ = eval_virtual_train.step(EventType.NORMAL, args.adversarial_degree)
+        _ = eval_virtual_train.step(EventType.NORMAL, adversarial=True)
         
         durata_normale = lognormal_normali.rvs(size=1)
         synthetic_normal['Durata'] = durata_normale[0]
@@ -523,8 +523,8 @@ def start_producer_threads(config):
             return False, "Producer is already running"
 
 
-        virtual_train = Train()
-        eval_virtual_train = Train()
+        virtual_train = Train(argparse.Namespace(**config))
+        eval_virtual_train = Train(argparse.Namespace(**config))
         
         """
         # Ensure generators are loaded based on current config
