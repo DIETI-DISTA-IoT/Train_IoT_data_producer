@@ -11,15 +11,13 @@ import logging
 import json
 import argparse
 import signal
-from train_monitor import TrainMonitor
 import os
 import requests
 import subprocess
-from flask import Flask, request, jsonify
+from flask import Flask
 import socket
-import yaml
 from OpenFAIR.container_api import ContainerAPI
-from train_simulator import Train, EventType
+from OpenFAIR import Train, EventType
 BASE_DIR = os.path.dirname(__file__)
 
 
