@@ -262,68 +262,6 @@ def get_status_robust():
     return 'INFECTED' if UNDER_ATTACK else 'HEALTHY'
 
 
-def adjust_probability(index, probability, main_classes, main_prob, low_prob):
-    """
-    Normalize the probabilities of classes based on given classes.
-    This function adjusts the probabilities of classes by separating them into
-    "main classes" (the ones specified in the config file)
-    and "low probability classes" (the rest). The first group will have the 80% of probability,
-    while the second group will have the remaining 20% of probability.
-    """
-    if index in main_classes:
-        return probability * 0.8 / main_prob
-    else:
-        return probability * 0.2 / low_prob
-
-
-def normalize_anomaly_probabilities(anomaly_classes):
-    global anomaly_probabilities
-    low_prob_classes = [x for x in range(0,19) if x not in anomaly_classes]
-    
-    main_anomaly_probabilities = anomaly_probabilities[anomaly_probabilities.index.isin(anomaly_classes)]
-    main_prob = main_anomaly_probabilities['probability'].sum()
-
-    low_anomaly_probabilities = anomaly_probabilities[anomaly_probabilities.index.isin(low_prob_classes)]
-    low_prob = low_anomaly_probabilities['probability'].sum()
-
-    anomaly_probabilities['probability'] = anomaly_probabilities.apply(
-        lambda row: adjust_probability(
-            row.name, row['probability'], anomaly_classes, main_prob, low_prob), axis=1)
-
-
-def normalize_diagnostics_probabilities(diagnostics_classes):
-    global diagnostics_probabilities
-    low_prob_classes = [x for x in range(0,15) if x not in diagnostics_classes]
-    # Filter for the subset of clusters
-    main_diagnostics_probabilities = diagnostics_probabilities[diagnostics_probabilities.index.isin(diagnostics_classes)]
-    main_prob = main_diagnostics_probabilities['probability'].sum()
-
-    low_diagnostics_probabilities = diagnostics_probabilities[diagnostics_probabilities.index.isin(low_prob_classes)]
-    low_prob = low_diagnostics_probabilities['probability'].sum()
-
-    diagnostics_probabilities['probability'] = diagnostics_probabilities.apply(
-        lambda row: adjust_probability(
-            row.name, row['probability'], diagnostics_classes, main_prob, low_prob), axis=1)
-
-
-def get_anomaly_generators_dict(anomaly_classes):
-    normalize_anomaly_probabilities(anomaly_classes)
-    anomaly_generators = {}
-    for anomaly_class in range(0,19):
-        with open(os.path.join(BASE_DIR, 'generators', 'anomalies', f'copula_anomalie_cluster_{anomaly_class}.pkl'), 'rb') as f:
-            anomaly_generators[anomaly_class] = pickle.load(f)
-    return anomaly_generators
-
-
-def get_diagnostics_generators_dict(diagnostics_classes):
-    normalize_diagnostics_probabilities(diagnostics_classes)
-    diagnostics_generators = {}
-    for diagnostics_class in range(0,15):
-        with open(os.path.join(BASE_DIR, 'generators', 'diagnostics', f'copula_normal_cluster_{diagnostics_class}.pkl'), 'rb') as f:
-            diagnostics_generators[diagnostics_class] = pickle.load(f)
-    return diagnostics_generators
-
-
 def signal_handler(sig, frame):
     global stop_threads
     logger.debug(f"Received signal {sig}. Gracefully stopping {VEHICLE_NAME} producer.")
@@ -378,14 +316,6 @@ def start_producer_threads(config):
 
         virtual_train = Train(argparse.Namespace(**config))
         eval_virtual_train = Train(argparse.Namespace(**config))
-        
-        """
-        # Ensure generators are loaded based on current config
-        if thread_args.anomaly_classes != list(range(0, 19)):
-            anomaly_generators = get_anomaly_generators_dict(thread_args.anomaly_classes)
-        if thread_args.diagnostics_classes != list(range(0, 15)):
-            diagnostics_generators = get_diagnostics_generators_dict(thread_args.diagnostics_classes)
-        """
         
         # Start threads
         anomaly_thread = threading.Thread(target=thread_anomalie, args=(argparse.Namespace(**config),))
@@ -519,30 +449,8 @@ def main():
 
     # Create attack object
     attack_lock = threading.Lock()
-    
-    """
-    attack = Attack(
-        target_ip=config['target_ip'],
-        target_port=config['target_port'],
-        duration=config['duration'],
-        packet_size=config['packet_size'],
-        delay=config['delay']
-    )
-    """
 
     logger.info(f"Setting up producing threads for vehicle: {VEHICLE_NAME}")
-    
-    """
-    # Load generators if needed
-    if config['anomaly_classes'] != list(range(0, 19)):
-        anomaly_generators = get_anomaly_generators_dict(config['anomaly_classes'])
-    if config['diagnostics_classes'] != list(range(0, 15)):
-        diagnostics_generators = get_diagnostics_generators_dict(config['diagnostics_classes'])
-    
-
-    # Create train monitor
-    train_monitor = TrainMonitor(argparse.Namespace(**config))
-    """
 
     # Create API using generic ContainerAPI subclass
     api = ProducerAPI(container_name=VEHICLE_NAME, port=5000)
