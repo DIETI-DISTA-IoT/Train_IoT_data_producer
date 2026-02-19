@@ -258,25 +258,6 @@ def thread_normali(args):
             time.sleep(durata_normale[0])
 
 
-def get_status_from_manager(vehicle_name):
-    url = f"http://{HOST_IP}:{MANAGER_PORT}/vehicle-status"
-    data = {"vehicle_name": vehicle_name}
-    response = requests.post(url, json=data)
-    logger.debug(f"Vehicle-status Response Status Code: {response.status_code}")
-    logger.debug(f"Vehicle-status Response Body: {response.text}")
-    return response.text
-
-
-def get_status_locally():
-    pid_request_command = 'pgrep -f attack.py'
-    # issue command in this host
-    pid_result = subprocess.run(pid_request_command, shell=True, stdout=subprocess.PIPE)
-    if pid_result.returncode == 0:
-        return 'INFECTED'
-    else:
-        return 'HEALTHY'
-
-
 def get_status_robust():    
     return 'INFECTED' if UNDER_ATTACK else 'HEALTHY'
 
