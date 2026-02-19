@@ -361,6 +361,22 @@ class ProducerAPI(ContainerAPI):
         validate_config(config)
         return True
 
+    def handle_command(self, command, params):
+        global virtual_train, eval_virtual_train
+        
+        if command == 'set_Mp_std':
+            new_val = params['Mp_std']
+            virtual_train.Mp_std = new_val
+            eval_virtual_train.Mp_std = new_val
+            return f"Set Mp_std to {new_val}"
+        elif command == 'set_Bp_std':
+            new_val = params['Bp_std']
+            virtual_train.Bp_std = new_val
+            eval_virtual_train.Bp_std = new_val
+            return f"Set Bp_std to {new_val}"
+
+
+
     def handle_start(self, data):
         global api_config
         self.logger.info("Main start command received!")
