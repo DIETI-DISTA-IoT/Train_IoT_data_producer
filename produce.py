@@ -49,6 +49,9 @@ stop_threads = False
 anomaly_generators = {}
 diagnostics_generators = {}
 
+virtual_train = None
+eval_virtual_train = None
+
 HOST_IP = os.getenv("HOST_IP")
 
 # load the probabilities of the classes:
@@ -362,17 +365,26 @@ class ProducerAPI(ContainerAPI):
         return True
 
     def handle_command(self, command, params):
-        global virtual_train, eval_virtual_train
+        global virtual_train, eval_virtual_train, logger
         
         if command == 'set_Mp_std':
             new_val = params['Mp_std']
+            if virtual_train is None:
+                logger.error("Error reseting Mp_std: Virtual trains not initialized yet")
+                return f"Virtual trains not initialized yet"
             virtual_train.Mp_std = new_val
             eval_virtual_train.Mp_std = new_val
+            logger.info(f"Set Mp_std to {new_val}")
             return f"Set Mp_std to {new_val}"
+        
         elif command == 'set_Bp_std':
             new_val = params['Bp_std']
+            if virtual_train is None:
+                logger.error("Error reseting Bp_std: Virtual trains not initialized yet")
+                return f"Virtual trains not initialized yet"
             virtual_train.Bp_std = new_val
             eval_virtual_train.Bp_std = new_val
+            logger.info(f"Set Bp_std to {new_val}")
             return f"Set Bp_std to {new_val}"
 
 
