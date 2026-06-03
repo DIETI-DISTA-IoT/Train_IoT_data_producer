@@ -2,8 +2,6 @@
 FROM python:3.10-slim
 
 # Install required build tools and libraries for native dependencies and librdkafka
-# This includes compilers and development libraries to allow Python packages with C/C++ extensions to compile properly
-# Install system dependencies. Using Debian slim to get many Python wheels (incl. confluent-kafka) without compiling.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates bash git \
     && rm -rf /var/lib/apt/lists/*
@@ -11,31 +9,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Upgrade pip to the latest version
 RUN pip install --no-cache-dir --upgrade pip
 
+# Full rebuild bust: pass CACHE_BUST=<timestamp> to re-run pip install AND code clone.
+# Used by:  make build-producer-scache
 ARG CACHE_BUST=1
+
+# Install dependencies from the build context (submodule checkout on disk).
+# This layer is cached when using scache-nolib; re-run only when using scache.
+COPY producer/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Code-only bust: pass CODE_BUST=<timestamp> to re-run only the git clones, keeping pip cached.
+# Used by:  make build-producer-scache-nolib
+ARG CODE_BUST=1
 
 WORKDIR /app
 
-# Set workdir and copy current project producer code
 RUN git clone --branch sereBench https://github.com/DIETI-DISTA-IoT/Train_IoT_data_producer.git .
-# Install the dependencies for our Flask producer
-RUN pip install --no-cache-dir -r requirements.txt
-# Also add the OpenFAIR package 
 RUN git clone --branch sereBench https://github.com/DIETI-DISTA-IoT/of-core OpenFAIR/
 
-
 # Set environment variables for Kafka connection
-# KAFKA_BROKER: Address of the Kafka broker
-# TOPIC_NAME: Kafka topic to which the synthetic data will be published
 ENV KAFKA_BROKER="kafka:9092"
 ENV VEHICLE_NAME="e700_4801"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 
-
-
-
-# Expose API ports
 EXPOSE 5000
 
-# Default command runs the Flask-enabled producer
 CMD ["python", "produce.py"]
