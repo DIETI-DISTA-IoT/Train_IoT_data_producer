@@ -6,6 +6,7 @@ import pickle
 import threading
 import time
 from confluent_kafka import SerializingProducer
+from confluent_kafka.admin import AdminClient
 from confluent_kafka.serialization import StringSerializer
 import logging
 import json
@@ -14,6 +15,7 @@ import signal
 import os
 import requests
 import subprocess
+import atexit
 from flask import Flask
 import socket
 from OpenFAIR.container_api import ContainerAPI
@@ -275,6 +277,40 @@ def configure_no_proxy():
     os.environ['no_proxy'] = os.environ.get('no_proxy', '') + f",{HOST_IP}"
 
 
+def cleanup_kafka():
+    """Flush the Kafka producer and delete all topics owned by this producer container.
+    Called on explicit stop and registered with atexit so it also runs on container shutdown."""
+    global producer, admin_client
+    _logger = logging.getLogger(f'[{VEHICLE_NAME}_PROD]') if 'logger' not in globals() else logger
+
+    if producer is not None:
+        try:
+            producer.flush(10)
+            _logger.info(f"Kafka producer flushed for {VEHICLE_NAME}")
+        except Exception as e:
+            _logger.warning(f"Producer flush failed (Kafka may be down): {e}")
+        producer = None
+
+    if admin_client is not None:
+        owned_topics = [
+            f"{VEHICLE_NAME}_anomalies",
+            f"{VEHICLE_NAME}_eval_anomalies",
+            f"{VEHICLE_NAME}_normal_data",
+            f"{VEHICLE_NAME}_HEALTH",
+        ]
+        try:
+            futures = admin_client.delete_topics(owned_topics, operation_timeout=10)
+            for topic, future in futures.items():
+                try:
+                    future.result()
+                    _logger.info(f"Deleted Kafka topic: {topic}")
+                except Exception as e:
+                    _logger.warning(f"Could not delete topic {topic} (may not exist or Kafka down): {e}")
+        except Exception as e:
+            _logger.warning(f"Topic deletion failed (Kafka may be down): {e}")
+        admin_client = None
+
+
 # Global state for API management
 api_config = {}
 api_running = False
@@ -351,6 +387,8 @@ def stop_producer_threads():
             logger.info(f"Joined to thread!")
         api_threads = []
         api_running = False
+
+        cleanup_kafka()
         stop_threads = False  # Reset for next start
         
         return True, "Producer stopped successfully"
@@ -430,7 +468,7 @@ class ProducerAPI(ContainerAPI):
 
 def main():
     global VEHICLE_NAME, MANAGER_PORT, UNDER_ATTACK, attack_lock
-    global producer, logger, anomaly_generators, diagnostics_generators
+    global producer, admin_client, logger, anomaly_generators, diagnostics_generators
     global anomaly_thread, diagnostics_thread, stop_threads, train_monitor
     global api_config
 
@@ -474,6 +512,12 @@ def main():
         'value.serializer': lambda x, ctx: json.dumps(x).encode('utf-8')
     }
     producer = SerializingProducer(conf_prod)
+
+    # Create Kafka admin client for topic lifecycle management
+    admin_client = AdminClient({'bootstrap.servers': config['kafka_broker']})
+
+    # Register cleanup so topics are deleted even on unclean shutdown
+    atexit.register(cleanup_kafka)
 
     # Create attack object
     attack_lock = threading.Lock()
