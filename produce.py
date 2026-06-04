@@ -289,7 +289,6 @@ def cleanup_kafka():
             _logger.info(f"Kafka producer flushed for {VEHICLE_NAME}")
         except Exception as e:
             _logger.warning(f"Producer flush failed (Kafka may be down): {e}")
-        producer = None
 
     if admin_client is not None:
         owned_topics = [
@@ -308,7 +307,6 @@ def cleanup_kafka():
                     _logger.warning(f"Could not delete topic {topic} (may not exist or Kafka down): {e}")
         except Exception as e:
             _logger.warning(f"Topic deletion failed (Kafka may be down): {e}")
-        admin_client = None
 
 
 # Global state for API management
