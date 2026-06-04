@@ -350,9 +350,16 @@ def start_producer_threads(config):
         if api_running:
             return False, "Producer is already running"
 
+        seed = config.get('seed', None)
+        ns_main = argparse.Namespace(**config)
+        ns_eval = argparse.Namespace(**config)
+        # Offset the eval train's seed by 1 so the two RNG streams are independent
+        # while both remaining fully deterministic given the same run seed.
+        if seed is not None:
+            ns_eval.seed = seed + 1
 
-        virtual_train = Train(argparse.Namespace(**config))
-        eval_virtual_train = Train(argparse.Namespace(**config))
+        virtual_train = Train(ns_main)
+        eval_virtual_train = Train(ns_eval)
         
         # Start threads
         anomaly_thread = threading.Thread(target=thread_anomalie, args=(argparse.Namespace(**config),))
@@ -566,7 +573,7 @@ def main():
                 logger.info("Attack stopped!")
                 return 'Attack stopped', 200
             else:
-                logger.info("Did nothing! Wasn\'t under attack!!")
+                logger.info("Did nothing! Wasn't under attack!!")
                 return 'Wasn\'t under attack!!', 400
 
     # Start Flask threads
