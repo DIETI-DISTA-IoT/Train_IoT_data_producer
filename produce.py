@@ -345,10 +345,18 @@ def validate_config(config):
 def start_producer_threads(config):
     """Start producer threads with configuration"""
     global api_threads, api_running, anomaly_generators, diagnostics_generators, virtual_train, eval_virtual_train
-    
+    global produced_records, produced_attacks, produced_anomalies, produced_diagnostics
+
     with api_lock:
         if api_running:
             return False, "Producer is already running"
+
+        # Reset all per-run counters so each run (within a reused container)
+        # starts from a clean slate, matching the fresh W&B run's step 0.
+        produced_records = 0
+        produced_attacks = 0
+        produced_anomalies = 0
+        produced_diagnostics = 0
 
         seed = config.get('seed', None)
         ns_main = argparse.Namespace(**config)
