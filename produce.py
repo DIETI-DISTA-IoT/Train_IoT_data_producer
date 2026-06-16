@@ -368,7 +368,18 @@ def start_producer_threads(config):
 
         virtual_train = Train(ns_main)
         eval_virtual_train = Train(ns_eval)
-        
+
+        # Decouple the adversarial eval-stream noise from the live-stream knob.
+        # The eval stream (published to {vehicle}_eval_* and consumed into the
+        # adversarial-training buffers) uses eval_Mp_std/eval_Bp_std when set,
+        # otherwise it falls back to Mp_std/Bp_std (backward-compatible).
+        eval_mp = config.get('eval_Mp_std', None)
+        eval_bp = config.get('eval_Bp_std', None)
+        if eval_mp is not None:
+            eval_virtual_train.Mp_std = eval_mp
+        if eval_bp is not None:
+            eval_virtual_train.Bp_std = eval_bp
+
         # Start threads
         anomaly_thread = threading.Thread(target=thread_anomalie, args=(argparse.Namespace(**config),))
         diagnostics_thread = threading.Thread(target=thread_normali, args=(argparse.Namespace(**config),))
@@ -437,6 +448,24 @@ class ProducerAPI(ContainerAPI):
             eval_virtual_train.Bp_std = new_val
             logger.info(f"Set Bp_std to {new_val}")
             return f"Set Bp_std to {new_val}"
+
+        elif command == 'set_eval_Mp_std':
+            new_val = params['eval_Mp_std']
+            if eval_virtual_train is None:
+                logger.error("Error resetting eval_Mp_std: Virtual trains not initialized yet")
+                return f"Virtual trains not initialized yet"
+            eval_virtual_train.Mp_std = new_val
+            logger.info(f"Set eval_Mp_std to {new_val}")
+            return f"Set eval_Mp_std to {new_val}"
+
+        elif command == 'set_eval_Bp_std':
+            new_val = params['eval_Bp_std']
+            if eval_virtual_train is None:
+                logger.error("Error resetting eval_Bp_std: Virtual trains not initialized yet")
+                return f"Virtual trains not initialized yet"
+            eval_virtual_train.Bp_std = new_val
+            logger.info(f"Set eval_Bp_std to {new_val}")
+            return f"Set eval_Bp_std to {new_val}"
 
 
 
