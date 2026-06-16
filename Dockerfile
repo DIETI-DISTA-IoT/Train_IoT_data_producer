@@ -22,9 +22,15 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # Used by:  make build-producer-scache-nolib
 ARG CODE_BUST=1
 
+# Branch of this application repo to clone. Defaults to sereBench (the platform
+# branch). Override to test a feature branch without merging, e.g.:
+#   docker build --build-arg CODE_BRANCH=claude/my-feature \
+#                --build-arg CODE_BUST=$(date +%s) ...
+ARG CODE_BRANCH=sereBench
+
 WORKDIR /app
 
-RUN git clone --branch sereBench https://github.com/DIETI-DISTA-IoT/Train_IoT_data_producer.git .
+RUN git clone --branch ${CODE_BRANCH} https://github.com/DIETI-DISTA-IoT/Train_IoT_data_producer.git .
 RUN git clone --branch sereBench https://github.com/DIETI-DISTA-IoT/of-core OpenFAIR/
 
 # Set environment variables for Kafka connection
