@@ -19,6 +19,7 @@ import atexit
 from flask import Flask
 import socket
 from OpenFAIR.container_api import ContainerAPI
+from OpenFAIR.packet_loss import PacketLossSimulator
 from OpenFAIR import Train, EventType
 BASE_DIR = os.path.dirname(__file__)
 
@@ -53,6 +54,12 @@ diagnostics_generators = {}
 
 virtual_train = None
 eval_virtual_train = None
+
+# Simulated lossy uplink for every message this vehicle emits (telemetry +
+# health probes). Replaced with the configured rate in start_producer_threads;
+# this module-level default only covers the (unused) window before a config
+# ever arrives.
+packet_loss_sim = PacketLossSimulator(0.1)
 
 HOST_IP = os.getenv("HOST_IP")
 
@@ -103,13 +110,16 @@ def produce_message(data, topic_name):
         data (dict): The data to be sent as a message.
         topic_name (str): The Kafka topic to which the message will be sent.
     """
+    if not topic_name.endswith('HEALTH'):
+        produced_records += 1
+
+    if packet_loss_sim.should_drop():
+        logger.debug(f"[packet-loss] dropped message for topic {topic_name} "
+                     f"(rate={packet_loss_sim.packet_loss_rate})")
+        return
+
     try:
         producer.produce(topic=topic_name, value=data)  # Send the message to Kafka
-        if topic_name.endswith('HEALTH'):
-            pass
-        else:
-            produced_records += 1
-
         if produced_records % 50 == 0:
             producer.flush()
         if produced_records % 100 == 0:
@@ -339,13 +349,17 @@ def validate_config(config):
     for field in required_fields:
         if not config.get(field):
             raise ValueError(f"Missing required configuration field: {field}")
-    
+
+    if 'packet_loss_rate' in config and config['packet_loss_rate'] is not None:
+        if not (0 <= float(config['packet_loss_rate']) <= 1):
+            raise ValueError("packet_loss_rate must be between 0 and 1")
+
     return True
 
 def start_producer_threads(config):
     """Start producer threads with configuration"""
     global api_threads, api_running, anomaly_generators, diagnostics_generators, virtual_train, eval_virtual_train
-    global produced_records, produced_attacks, produced_anomalies, produced_diagnostics
+    global produced_records, produced_attacks, produced_anomalies, produced_diagnostics, packet_loss_sim
 
     with api_lock:
         if api_running:
@@ -357,6 +371,7 @@ def start_producer_threads(config):
         produced_attacks = 0
         produced_anomalies = 0
         produced_diagnostics = 0
+        packet_loss_sim = PacketLossSimulator(config.get('packet_loss_rate', 0.1))
 
         seed = config.get('seed', None)
         ns_main = argparse.Namespace(**config)
@@ -503,6 +518,7 @@ class ProducerAPI(ContainerAPI):
             "anomalies_produced": produced_anomalies,
             "diagnostics_produced": produced_diagnostics,
             "under_attack": UNDER_ATTACK,
+            "packet_loss": packet_loss_sim.stats(),
             "config": api_config
         }
         self.logger.info(f"Main status requested: {main_status}")
