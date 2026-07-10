@@ -110,10 +110,15 @@ def produce_message(data, topic_name):
         data (dict): The data to be sent as a message.
         topic_name (str): The Kafka topic to which the message will be sent.
     """
-    if not topic_name.endswith('HEALTH'):
+    # HEALTH probes feed the security manager's own detector *and* are logged
+    # straight to W&B (Wandber subscribes to '^.*_HEALTH$'), so they are never
+    # subject to simulated packet loss — only the telemetry that trains the
+    # vehicle consumer (anomalies/eval_anomalies/normal_data) is.
+    is_health = topic_name.endswith('HEALTH')
+    if not is_health:
         produced_records += 1
 
-    if packet_loss_sim.should_drop():
+    if not is_health and packet_loss_sim.should_drop():
         logger.debug(f"[packet-loss] dropped message for topic {topic_name} "
                      f"(rate={packet_loss_sim.packet_loss_rate})")
         return
