@@ -20,6 +20,7 @@ from flask import Flask
 import socket
 from OpenFAIR.container_api import ContainerAPI
 from OpenFAIR.packet_loss import PacketLossSimulator
+from OpenFAIR.network_delay import NetworkDelaySimulator
 from OpenFAIR import Train, EventType
 BASE_DIR = os.path.dirname(__file__)
 
@@ -60,6 +61,12 @@ eval_virtual_train = None
 # this module-level default only covers the (unused) window before a config
 # ever arrives.
 packet_loss_sim = PacketLossSimulator(0.1)
+
+# Simulated network latency + jitter on this vehicle's outbound telemetry
+# (anomalies/eval_anomalies/normal_data). Like packet_loss_sim, replaced with
+# the configured values in start_producer_threads; health probes are never
+# delayed (they are W&B / security-manager bound, same policy as packet loss).
+network_delay_sim = NetworkDelaySimulator(0.0, 0.0)
 
 HOST_IP = os.getenv("HOST_IP")
 
@@ -123,14 +130,22 @@ def produce_message(data, topic_name):
                      f"(rate={packet_loss_sim.packet_loss_rate})")
         return
 
-    try:
-        producer.produce(topic=topic_name, value=data)  # Send the message to Kafka
-        if produced_records % 50 == 0:
-            producer.flush()
-        if produced_records % 100 == 0:
-            logger.info(f"sent {produced_records} records for now. {produced_attacks} attacks, {produced_anomalies} anomalies, and {produced_diagnostics} diagnostics.")
-    except Exception as e:
-        print(f"Error while producing message to {topic_name} : {e}")
+    def _deliver():
+        try:
+            producer.produce(topic=topic_name, value=data)  # Send the message to Kafka
+            if produced_records % 50 == 0:
+                producer.flush()
+            if produced_records % 100 == 0:
+                logger.info(f"sent {produced_records} records for now. {produced_attacks} attacks, {produced_anomalies} anomalies, and {produced_diagnostics} diagnostics.")
+        except Exception as e:
+            print(f"Error while producing message to {topic_name} : {e}")
+
+    # Health probes are delivered immediately (never delayed, same policy as
+    # packet loss); telemetry goes through the simulated lossy+laggy uplink.
+    if is_health:
+        _deliver()
+    else:
+        network_delay_sim.send(_deliver)
 
 
 def sample_anomaly_from_global():
@@ -359,12 +374,16 @@ def validate_config(config):
         if not (0 <= float(config['packet_loss_rate']) <= 1):
             raise ValueError("packet_loss_rate must be between 0 and 1")
 
+    for field in ('delay_mean_ms', 'jitter_std_ms'):
+        if config.get(field) is not None and float(config[field]) < 0:
+            raise ValueError(f"{field} must be non-negative")
+
     return True
 
 def start_producer_threads(config):
     """Start producer threads with configuration"""
     global api_threads, api_running, anomaly_generators, diagnostics_generators, virtual_train, eval_virtual_train
-    global produced_records, produced_attacks, produced_anomalies, produced_diagnostics, packet_loss_sim
+    global produced_records, produced_attacks, produced_anomalies, produced_diagnostics, packet_loss_sim, network_delay_sim
 
     with api_lock:
         if api_running:
@@ -377,6 +396,16 @@ def start_producer_threads(config):
         produced_anomalies = 0
         produced_diagnostics = 0
         packet_loss_sim = PacketLossSimulator(config.get('packet_loss_rate', 0.1))
+        # Tear down any previous run's delivery worker before replacing it, so a
+        # reused container doesn't leak scheduler threads across runs. drain=False:
+        # stale in-flight messages from the previous run are dropped rather than
+        # flushed into the just-cleaned-up Kafka producer.
+        try:
+            network_delay_sim.close(drain=False)
+        except Exception:
+            pass
+        network_delay_sim = NetworkDelaySimulator(
+            config.get('delay_mean_ms', 0.0), config.get('jitter_std_ms', 0.0))
 
         seed = config.get('seed', None)
         ns_main = argparse.Namespace(**config)
@@ -524,6 +553,7 @@ class ProducerAPI(ContainerAPI):
             "diagnostics_produced": produced_diagnostics,
             "under_attack": UNDER_ATTACK,
             "packet_loss": packet_loss_sim.stats(),
+            "network_delay": network_delay_sim.stats(),
             "config": api_config
         }
         self.logger.info(f"Main status requested: {main_status}")
