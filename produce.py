@@ -55,6 +55,11 @@ diagnostics_generators = {}
 
 virtual_train = None
 eval_virtual_train = None
+# Dedicated Train instance for the eval-anchor stream (see thread_eval_anchors
+# below) — kept separate from eval_virtual_train so the two threads never race
+# on the same mutable Train/RNG state, and so eval_virtual_train's existing
+# RNG sequence (relied on for ET1/ET2/ET3 reproducibility) is untouched.
+anchor_virtual_train = None
 
 # Simulated lossy uplink for every message this vehicle emits (telemetry +
 # health probes). Replaced with the configured rate in start_producer_threads;
@@ -241,6 +246,47 @@ def thread_anomalie(args):
             time.sleep(durata_anomalia[0])
 
 
+def thread_eval_anchors(args):
+    """Independent, fixed-cadence, class-balanced trickle of eval anchors.
+
+    Round-robins NORMAL/ANOMALY/ATTACK on its own timer (eval_anchor_interval_secs),
+    using a dedicated Train instance, entirely decoupled from mu_normal/
+    mu_anomalies/the attack-infection schedule. This exists so the consumer's
+    robustness evals (sigma-grid, HSJA clean-anchors) always have a class-
+    balanced sample to fall back on, even when those knobs are pushed hard to
+    induce class scarcity for a class-imbalance experiment (see
+    config/overrides/exp_et4_angela_abnormalscarce_mild.yaml). It is a no-op
+    for every experiment that doesn't induce such scarcity: the consumer only
+    draws from this stream when its live per-class buffers run thin.
+    """
+    global anchor_virtual_train
+    logger.info(f"Starting eval-anchor thread for vehicle: {VEHICLE_NAME}")
+    topic_name = f"{VEHICLE_NAME}_eval_anchors"
+    interval = getattr(args, 'eval_anchor_interval_secs', 2.0)
+    cycle = [EventType.NORMAL, EventType.ANOMALY, EventType.ATTACK]
+    i = 0
+
+    while not stop_threads:
+        event = cycle[i % len(cycle)]
+        i += 1
+
+        anchor_sample = anchor_virtual_train.step(event, adversarial=True)
+        anchor_sample['Durata'] = 0.0
+        anchor_sample['Flotta'] = 'ETR700'
+        anchor_sample['Veicolo'] = VEHICLE_NAME
+        anchor_sample['Test'] = 'N'
+        anchor_sample['Timestamp'] = pd.Timestamp.now()
+        anchor_sample['Timestamp chiusura'] = anchor_sample['Timestamp']
+
+        anchor_sample = round_dict_numbers(anchor_sample, 4)
+        data_to_send = convert_dict_to_json_serializable(anchor_sample)
+        data_to_send['Timestamp'] = str(data_to_send['Timestamp'])
+        data_to_send['Timestamp chiusura'] = str(data_to_send['Timestamp chiusura'])
+
+        produce_message(data_to_send, topic_name)
+        time.sleep(interval)
+
+
 def sample_normal_from_global():
     return -1, copula_normali.sample(1)
 
@@ -324,6 +370,7 @@ def cleanup_kafka():
         owned_topics = [
             f"{VEHICLE_NAME}_anomalies",
             f"{VEHICLE_NAME}_eval_anomalies",
+            f"{VEHICLE_NAME}_eval_anchors",
             f"{VEHICLE_NAME}_normal_data",
             f"{VEHICLE_NAME}_HEALTH",
         ]
@@ -384,6 +431,7 @@ def start_producer_threads(config):
     """Start producer threads with configuration"""
     global api_threads, api_running, anomaly_generators, diagnostics_generators, virtual_train, eval_virtual_train
     global produced_records, produced_attacks, produced_anomalies, produced_diagnostics, packet_loss_sim, network_delay_sim
+    global anchor_virtual_train
 
     with api_lock:
         if api_running:
@@ -410,13 +458,17 @@ def start_producer_threads(config):
         seed = config.get('seed', None)
         ns_main = argparse.Namespace(**config)
         ns_eval = argparse.Namespace(**config)
-        # Offset the eval train's seed by 1 so the two RNG streams are independent
-        # while both remaining fully deterministic given the same run seed.
+        ns_anchor = argparse.Namespace(**config)
+        # Offset the eval/anchor trains' seeds so all three RNG streams are
+        # independent while remaining fully deterministic given the same run
+        # seed.
         if seed is not None:
             ns_eval.seed = seed + 1
+            ns_anchor.seed = seed + 2
 
         virtual_train = Train(ns_main)
         eval_virtual_train = Train(ns_eval)
+        anchor_virtual_train = Train(ns_anchor)
 
         # Decouple the adversarial eval-stream noise from the live-stream knob.
         # The eval stream (published to {vehicle}_eval_* and consumed into the
@@ -432,14 +484,17 @@ def start_producer_threads(config):
         # Start threads
         anomaly_thread = threading.Thread(target=thread_anomalie, args=(argparse.Namespace(**config),))
         diagnostics_thread = threading.Thread(target=thread_normali, args=(argparse.Namespace(**config),))
-        
+        eval_anchor_thread = threading.Thread(target=thread_eval_anchors, args=(argparse.Namespace(**config),))
+
         anomaly_thread.daemon = True
         diagnostics_thread.daemon = True
-        
+        eval_anchor_thread.daemon = True
+
         anomaly_thread.start()
         diagnostics_thread.start()
-        
-        api_threads = [anomaly_thread, diagnostics_thread]
+        eval_anchor_thread.start()
+
+        api_threads = [anomaly_thread, diagnostics_thread, eval_anchor_thread]
         api_running = True
         
         return True, "Producer started successfully"
