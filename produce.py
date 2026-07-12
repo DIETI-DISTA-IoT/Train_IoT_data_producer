@@ -247,14 +247,18 @@ def thread_anomalie(args):
 
 
 def thread_eval_anchors(args):
-    """Independent, fixed-cadence, class-balanced trickle of eval anchors.
+    """Independent, fixed-cadence, class-balanced trickle of CLEAN eval anchors.
 
     Round-robins NORMAL/ANOMALY/ATTACK on its own timer (eval_anchor_interval_secs),
     using a dedicated Train instance, entirely decoupled from mu_normal/
-    mu_anomalies/the attack-infection schedule. This exists so the consumer's
-    robustness evals (sigma-grid, HSJA clean-anchors) always have a class-
-    balanced sample to fall back on, even when those knobs are pushed hard to
-    induce class scarcity for a class-imbalance experiment (see
+    mu_anomalies/the attack-infection schedule. Generated with adversarial=False
+    (no Mp_std/Bp_std noise applied) because it backstops the CLEAN buffers
+    (diagnostics_buffer/anomalies_buffer/attacks_buffer) that sigma_grid_evaluation
+    and hsja_evaluation's primary clean_anchors=True path read from — not the
+    adversarial eval_* buffers, which stay untouched by this stream. This
+    exists so those robustness evals always have a class-balanced sample to
+    fall back on, even when mu_normal/mu_anomalies are pushed hard to induce
+    class scarcity for a class-imbalance experiment (see
     config/overrides/exp_et4_angela_abnormalscarce_mild.yaml). It is a no-op
     for every experiment that doesn't induce such scarcity: the consumer only
     draws from this stream when its live per-class buffers run thin.
@@ -270,7 +274,7 @@ def thread_eval_anchors(args):
         event = cycle[i % len(cycle)]
         i += 1
 
-        anchor_sample = anchor_virtual_train.step(event, adversarial=True)
+        anchor_sample = anchor_virtual_train.step(event, adversarial=False)
         anchor_sample['Durata'] = 0.0
         anchor_sample['Flotta'] = 'ETR700'
         anchor_sample['Veicolo'] = VEHICLE_NAME
